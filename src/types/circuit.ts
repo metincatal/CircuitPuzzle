@@ -305,7 +305,49 @@ export const calculatePowerFlow = (tiles: Tile[]): void => {
     }
 };
 
+/**
+ * Seviye Çözülme Kontrolü
+ * 
+ * KOŞULLAR:
+ * 1. Tüm lambalar yanmalı (powered)
+ * 2. Tüm işlevsel parçalar (functional tiles) güç kaynağına bağlı olmalı
+ *    Yani hiçbir "kopuk" parça kalmamalı - devre tek bir bütün olmalı
+ */
 export const isLevelSolved = (tiles: Tile[]): boolean => {
+    // Koşul 1: Tüm lambalar yanıyor mu?
     const bulbs = tiles.filter(t => t.type === 'bulb');
-    return bulbs.length > 0 && bulbs.every(b => b.isPowered);
+    const allBulbsPowered = bulbs.length > 0 && bulbs.every(b => b.isPowered);
+
+    if (!allBulbsPowered) return false;
+
+    // Koşul 2: Tüm işlevsel parçalar güç kaynağına bağlı mı?
+    // Tüm tile'lar powered olmalı (kopuk parça olmamalı)
+    const allTilesPowered = tiles.every(t => t.isPowered);
+
+    return allTilesPowered;
+};
+
+/**
+ * Yıldız Hesaplama
+ * Bitirme süresine göre 1-3 yıldız verir
+ * 
+ * @param seconds - Bitirme süresi (saniye)
+ * @param tileCount - Seviyedeki parça sayısı (zorluk faktörü)
+ */
+export const calculateStars = (seconds: number, tileCount: number): number => {
+    // Zorluk faktörü: Daha fazla parça = daha fazla süre toleransı
+    // Base süre: Parça başına ~3 saniye
+    const baseTime = tileCount * 3;
+
+    // 3 Yıldız: Base sürenin altında
+    // 2 Yıldız: Base sürenin 2 katına kadar
+    // 1 Yıldız: Üstünde (tamamladıysan en az 1)
+
+    if (seconds <= baseTime) {
+        return 3;
+    } else if (seconds <= baseTime * 2) {
+        return 2;
+    } else {
+        return 1;
+    }
 };

@@ -1,11 +1,14 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useRef } from 'react';
 import { View, Dimensions, Pressable, Animated } from 'react-native';
 import Svg, { Path, Circle, G, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { Zap, Lightbulb } from 'lucide-react-native';
 import {
     Level,
+    Tile,
     getActiveConnections,
+    getTileAt,
 } from '../types/circuit';
+import { SparkParticles } from './SparkParticles';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -34,6 +37,104 @@ const ZenNoise = ({ width, height }: { width: number, height: number }) => (
     </G>
 );
 
+// Animated Circle for pulsing bulbs
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+interface TileGraphics {
+    id: string;
+    position: { row: number; col: number };
+    type: string;
+    rotation: number;
+    isPowered: boolean;
+    cx: number;
+    cy: number;
+    d: string;
+    isJunction: boolean;
+}
+
+// Bulb Pulse Aura Component (inline for performance)
+const BulbPulseAuraInline: React.FC<{
+    cx: number;
+    cy: number;
+    isPowered: boolean;
+    uniqueId: string;
+}> = ({ cx, cy, isPowered, uniqueId }) => {
+    const pulseAnim = useRef(new Animated.Value(0)).current;
+    const opacityAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        if (isPowered) {
+            Animated.timing(opacityAnim, {
+                toValue: 1,
+                duration: 300,
+                useNativeDriver: false,
+            }).start();
+
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(pulseAnim, {
+                        toValue: 1,
+                        duration: 2000,
+                        useNativeDriver: false,
+                    }),
+                    Animated.timing(pulseAnim, {
+                        toValue: 0,
+                        duration: 2000,
+                        useNativeDriver: false,
+                    }),
+                ])
+            ).start();
+        } else {
+            opacityAnim.stopAnimation();
+            pulseAnim.stopAnimation();
+            opacityAnim.setValue(0);
+            pulseAnim.setValue(0);
+        }
+
+        return () => {
+            opacityAnim.stopAnimation();
+            pulseAnim.stopAnimation();
+        };
+    }, [isPowered]);
+
+    if (!isPowered) return null;
+
+    const maxRadius = 40;
+
+    return (
+        <Animated.View
+            style={{
+                position: 'absolute',
+                left: cx - maxRadius,
+                top: cy - maxRadius,
+                width: maxRadius * 2,
+                height: maxRadius * 2,
+                opacity: opacityAnim,
+            }}
+            pointerEvents="none"
+        >
+            <Svg width={maxRadius * 2} height={maxRadius * 2}>
+                <Defs>
+                    <RadialGradient id={`pulseAura-${uniqueId}`} cx="50%" cy="50%" r="50%">
+                        <Stop offset="0" stopColor={COLORS.bulbGlow} stopOpacity="0.7" />
+                        <Stop offset="0.4" stopColor={COLORS.bulbGlow} stopOpacity="0.3" />
+                        <Stop offset="1" stopColor={COLORS.bulbGlow} stopOpacity="0" />
+                    </RadialGradient>
+                </Defs>
+                <AnimatedCircle
+                    cx={maxRadius}
+                    cy={maxRadius}
+                    r={pulseAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [maxRadius * 0.6, maxRadius],
+                    })}
+                    fill={`url(#pulseAura-${uniqueId})`}
+                />
+            </Svg>
+        </Animated.View>
+    );
+};
+
 export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
     level,
     onTilePress,
@@ -44,6 +145,10 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
 
     // Pulse Animasyonu (Win State)
     const [pulseAnim] = useState(new Animated.Value(1));
+
+    // Spark tetikleyici - powered tile sayısı değiştiğinde tetiklenir
+    const [sparkTrigger, setSparkTrigger] = useState('initial');
+    const prevPoweredCount = useRef(0);
 
     useEffect(() => {
         if (level.isSolved) {
@@ -116,11 +221,77 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
         });
     }, [level, cellSize]);
 
+    // Bağlantı noktalarını hesapla (kıvılcımlar için)
+    const connectionPoints = useMemo(() => {
+        const points: { x: number; y: number; color: string }[] = [];
+
+        level.tiles.forEach(tile => {
+            if (!tile.isPowered) return;
+
+            const activeConns = getActiveConnections(tile);
+            const cx = tile.position.col * cellSize + cellSize / 2;
+            const cy = tile.position.row * cellSize + cellSize / 2;
+            const half = cellSize / 2;
+
+            // Sadece gerçek bağlantı noktalarında kıvılcım göster
+            const directions = [
+                { dir: 'top', dx: 0, dy: -half, nr: -1, nc: 0, opp: 'bottom' },
+                { dir: 'right', dx: half, dy: 0, nr: 0, nc: 1, opp: 'left' },
+                { dir: 'bottom', dx: 0, dy: half, nr: 1, nc: 0, opp: 'top' },
+                { dir: 'left', dx: -half, dy: 0, nr: 0, nc: -1, opp: 'right' },
+            ];
+
+            directions.forEach(({ dir, dx, dy, nr, nc, opp }) => {
+                if (!activeConns[dir as keyof typeof activeConns]) return;
+
+                const neighbor = getTileAt(
+                    level.tiles,
+                    tile.position.row + nr,
+                    tile.position.col + nc
+                );
+
+                if (neighbor && neighbor.isPowered) {
+                    const neighborConns = getActiveConnections(neighbor);
+                    if (neighborConns[opp as keyof typeof neighborConns]) {
+                        // Gerçek bağlantı var - sadece bir kez ekle (ID kontrolü ile)
+                        const pointKey = `${Math.min(tile.position.row, neighbor.position.row)}-${Math.min(tile.position.col, neighbor.position.col)}-${dir}`;
+                        const existing = points.find(p =>
+                            Math.abs(p.x - (cx + dx)) < 5 && Math.abs(p.y - (cy + dy)) < 5
+                        );
+
+                        if (!existing) {
+                            points.push({
+                                x: cx + dx,
+                                y: cy + dy,
+                                color: COLORS.glow,
+                            });
+                        }
+                    }
+                }
+            });
+        });
+
+        return points;
+    }, [level, cellSize]);
+
+    // Powered tile sayısı değiştiğinde spark tetikle
+    useEffect(() => {
+        const currentPoweredCount = level.tiles.filter(t => t.isPowered).length;
+        if (currentPoweredCount > prevPoweredCount.current) {
+            setSparkTrigger(`spark-${Date.now()}`);
+        }
+        prevPoweredCount.current = currentPoweredCount;
+    }, [level.tiles]);
+
+    // Bulb tile'ları
+    const bulbTiles = useMemo(() => {
+        return tileGraphics.filter(t => t.type === 'bulb' && t.isPowered);
+    }, [tileGraphics]);
+
     return (
         <Animated.View style={{
             width: canvasWidth,
             height: canvasHeight,
-            // Tüm içerik (SVG + Icons) birlikte büyüyecek
             transform: [{ scale: pulseAnim }]
         }}>
             <Svg width={canvasWidth} height={canvasHeight}>
@@ -171,18 +342,36 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
                             />
                         )}
 
-                        {/* Glow Circles for Source/Bulb */}
+                        {/* Glow Circles for Source */}
                         {t.type === 'source' && t.isPowered && (
                             <Circle cx={t.cx} cy={t.cy} r={22} fill="url(#gradSource)" opacity={0.6} />
                         )}
+                        {/* Static Bulb Glow (Pulse Aura ayrı render edilecek) */}
                         {t.type === 'bulb' && t.isPowered && (
-                            <Circle cx={t.cx} cy={t.cy} r={24} fill="url(#gradBulb)" opacity={0.6} />
+                            <Circle cx={t.cx} cy={t.cy} r={24} fill="url(#gradBulb)" opacity={0.4} />
                         )}
                     </G>
                 ))}
             </Svg>
 
-            {/* TOUCH & ICON LAYER - Artık Animated.View'ın içinde, SVG ile senkronize */}
+            {/* BULB PULSE AURA LAYER - Dinamik Parlama */}
+            {bulbTiles.map(t => (
+                <BulbPulseAuraInline
+                    key={`aura-${t.id}`}
+                    cx={t.cx}
+                    cy={t.cy}
+                    isPowered={t.isPowered}
+                    uniqueId={t.id}
+                />
+            ))}
+
+            {/* SPARK PARTICLES LAYER - Etkileşimli Kıvılcımlar */}
+            <SparkParticles
+                points={connectionPoints}
+                triggerKey={sparkTrigger}
+            />
+
+            {/* TOUCH & ICON LAYER */}
             {tileGraphics.map((t, i) => (
                 <Pressable
                     key={`touch-${t.id}`}
@@ -194,7 +383,6 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
                         height: cellSize,
                         alignItems: 'center',
                         justifyContent: 'center',
-                        // İkonlar artık parent ile birlikte scale oluyor
                     }}
                     onPress={() => onTilePress(t.id)}
                 >

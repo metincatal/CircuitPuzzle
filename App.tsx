@@ -3,27 +3,61 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View, Pressable, SafeAreaView, Dimensions, Platform, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { Zap, Play, RotateCcw, X, Clock } from 'lucide-react-native';
+import { Zap, Play, RotateCcw, X, Clock, Trophy, Star } from 'lucide-react-native';
 
 import { CircuitCanvas } from './src/components/CircuitCanvas';
 import { Starfield } from './src/components/Starfield';
+import { ConfettiRain } from './src/components/ConfettiRain';
+import { StarRating } from './src/components/StarRating';
 import SoundManager from './src/utils/SoundManager';
+import HapticManager from './src/utils/HapticManager';
+import StorageManager from './src/utils/StorageManager';
 import {
   Level,
   generateGridLevel,
   calculatePowerFlow,
   isLevelSolved,
+  calculateStars,
 } from './src/types/circuit';
 
 const { width, height } = Dimensions.get('window');
 
-// --- ŞIK WIN MODAL (Kapatılabilir) ---
-const WinModal = ({ moves, timeStr, onNextLevel, onRetry, onClose }: any) => {
+// --- GELİŞTİRİLMİŞ WIN MODAL ---
+interface WinModalProps {
+  timeStr: string;
+  stars: number;
+  isNewRecord: boolean;
+  bestTimeStr: string | null;
+  onNextLevel: () => void;
+  onRetry: () => void;
+  onClose: () => void;
+}
+
+const WinModal: React.FC<WinModalProps> = ({
+  timeStr,
+  stars,
+  isNewRecord,
+  bestTimeStr,
+  onNextLevel,
+  onRetry,
+  onClose,
+}) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const newRecordAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-  }, []);
+
+    // Yeni rekor animasyonu
+    if (isNewRecord) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(newRecordAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+          Animated.timing(newRecordAnim, { toValue: 0.6, duration: 800, useNativeDriver: true }),
+        ])
+      ).start();
+    }
+  }, [isNewRecord]);
 
   return (
     <View style={styles.modalOverlay}>
@@ -41,16 +75,37 @@ const WinModal = ({ moves, timeStr, onNextLevel, onRetry, onClose }: any) => {
 
         <Text style={styles.modalTitle}>LEVEL COMPLETE</Text>
 
-        {/* Skorlar: Süre ön planda */}
-        <View style={styles.scoreRow}>
-          <Clock size={16} color="#fff" style={{ marginRight: 6 }} />
-          <Text style={styles.modalScore}>{timeStr}</Text>
+        {/* Yıldız Gösterimi */}
+        <View style={styles.starsContainer}>
+          <StarRating stars={stars} size={48} animated={true} delay={300} />
+        </View>
+
+        {/* Süre ve Rekor */}
+        <View style={styles.timeContainer}>
+          <View style={styles.scoreRow}>
+            <Clock size={16} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={styles.modalScore}>{timeStr}</Text>
+          </View>
+
+          {isNewRecord && (
+            <Animated.View style={[styles.newRecordBadge, { opacity: newRecordAnim }]}>
+              <Trophy size={14} color="#ffd700" style={{ marginRight: 4 }} />
+              <Text style={styles.newRecordText}>YENİ REKOR!</Text>
+            </Animated.View>
+          )}
+
+          {bestTimeStr && !isNewRecord && (
+            <View style={styles.bestTimeRow}>
+              <Trophy size={12} color="rgba(255,255,255,0.5)" style={{ marginRight: 4 }} />
+              <Text style={styles.bestTimeText}>En İyi: {bestTimeStr}</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.modalLine} />
 
         <Pressable
-          style={({ pressed }) => [styles.btnNext, pressed && styles.btnPressed]}
+          style={({ pressed }) => [styles.btnNext, pressed && styles.buttonPressed]}
           onPress={onNextLevel}
         >
           <Text style={styles.btnNextText}>SONRAKİ BÖLÜM</Text>
@@ -58,7 +113,7 @@ const WinModal = ({ moves, timeStr, onNextLevel, onRetry, onClose }: any) => {
         </Pressable>
 
         <Pressable
-          style={({ pressed }) => [styles.btnRetry, pressed && styles.btnPressed]}
+          style={({ pressed }) => [styles.btnRetry, pressed && styles.buttonPressed]}
           onPress={onRetry}
         >
           <RotateCcw size={16} color="rgba(255,255,255,0.5)" />
@@ -82,8 +137,23 @@ export default function App() {
   // Modal State
   const [showWinModal, setShowWinModal] = useState(false);
 
+  // Confetti State
+  const [showConfetti, setShowConfetti] = useState(false);
+
+  // Yıldız ve Rekor State
+  const [earnedStars, setEarnedStars] = useState(0);
+  const [isNewRecord, setIsNewRecord] = useState(false);
+  const [bestTime, setBestTime] = useState<number | null>(null);
+
+  // Seviye numarası (basit sayaç)
+  const [levelNumber, setLevelNumber] = useState(1);
+
   useEffect(() => {
-    SoundManager.loadSounds();
+    const init = async () => {
+      await StorageManager.initialize();
+      SoundManager.loadSounds();
+    };
+    init();
   }, []);
 
   useEffect(() => {
@@ -116,6 +186,28 @@ export default function App() {
       setIsActiveTimer(false); // Süreyi Durdur
       SoundManager.playWin();
 
+      // Kutlama Haptic Feedback
+      HapticManager.celebrationBurst();
+
+      // Konfeti yağmuru başlat
+      setShowConfetti(true);
+
+      // Yıldız hesapla
+      const stars = calculateStars(seconds, level.tiles.length);
+      setEarnedStars(stars);
+
+      // Rekoru kaydet ve kontrol et
+      const saveRecord = async () => {
+        const result = await StorageManager.saveLevelCompletion(
+          `level-${levelNumber}`,
+          seconds,
+          stars
+        );
+        setIsNewRecord(result.isNewRecord);
+        setBestTime(result.previousBest);
+      };
+      saveRecord();
+
       // 2 Saniye Gecikmeli Modal
       const timer = setTimeout(() => {
         setShowWinModal(true);
@@ -125,13 +217,24 @@ export default function App() {
     }
   }, [level?.isSolved]);
 
-  const startNewLevel = () => {
+  const startNewLevel = async () => {
     setShowWinModal(false);
+    setShowConfetti(false);
+    setIsNewRecord(false);
+    setEarnedStars(0);
+
     const newLevel = generateGridLevel();
 
     // Yeni Level'ı ve Initial State'i kaydet (Deep Copy önemli)
     setLevel(newLevel);
     setInitialTiles(JSON.parse(JSON.stringify(newLevel.tiles)));
+
+    // Seviye numarasını artır
+    setLevelNumber(prev => prev + 1);
+
+    // Önceki rekor bilgisini getir
+    const record = await StorageManager.getLevelRecord(`level-${levelNumber + 1}`);
+    setBestTime(record?.bestTime ?? null);
 
     // Timer Sıfırla ve Başlat
     setSeconds(0);
@@ -143,19 +246,18 @@ export default function App() {
     if (!level || initialTiles.length === 0) return;
 
     setShowWinModal(false); // Modalı kapa
+    setShowConfetti(false); // Konfetiyi kapa
 
     // Mevcut tile'ları initial state'e döndür
-    // Ancak level objesinin diğer özellikleri (rows, cols) aynı kalmalı
-    // Deep copy ile state'e ata ki referans sorunu olmasın
     const resetTiles = JSON.parse(JSON.stringify(initialTiles));
 
-    // Güç akışını başlangıç haline göre tekrar hesapla (belki gerekmez ama güvenli)
+    // Güç akışını başlangıç haline göre tekrar hesapla
     calculatePowerFlow(resetTiles);
 
     setLevel({
       ...level,
       tiles: resetTiles,
-      isSolved: false // Çözülmemiş hale dön
+      isSolved: false
     });
 
     // Timer'ı Sıfırla
@@ -166,6 +268,8 @@ export default function App() {
   const handleTilePress = useCallback((tileId: string) => {
     if (!level || level.isSolved) return;
 
+    // Dokunsal geri bildirim - Hafif tıklama
+    HapticManager.lightTap();
     SoundManager.playClick();
 
     setLevel(prevLevel => {
@@ -205,8 +309,13 @@ export default function App() {
 
       <SafeAreaView style={styles.safeArea}>
 
-        {/* HEADER: Sadeleştirilmiş */}
+        {/* HEADER */}
         <View style={styles.header}>
+          {/* Seviye Numarası */}
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelText}>LEVEL {levelNumber}</Text>
+          </View>
+
           {/* Timer Rozeti */}
           <View style={[styles.timerBadge, level.isSolved && styles.timerBadgeSuccess]}>
             <Clock size={14} color={level.isSolved ? "#2ecc71" : "rgba(255,255,255,0.6)"} />
@@ -214,6 +323,14 @@ export default function App() {
               {formatTime(seconds)}
             </Text>
           </View>
+
+          {/* Rekor Göstergesi (varsa) */}
+          {bestTime !== null && (
+            <View style={styles.bestTimeBadge}>
+              <Trophy size={12} color="#ffd700" />
+              <Text style={styles.bestTimeBadgeText}>{formatTime(bestTime)}</Text>
+            </View>
+          )}
         </View>
 
         {/* GAME CANVAS */}
@@ -273,13 +390,21 @@ export default function App() {
       {/* WIN MODAL OVERLAY */}
       {showWinModal && (
         <WinModal
-          moves={0}
           timeStr={formatTime(seconds)}
+          stars={earnedStars}
+          isNewRecord={isNewRecord}
+          bestTimeStr={bestTime !== null ? formatTime(bestTime) : null}
           onNextLevel={startNewLevel}
-          onRetry={handleReset} // Modal içinden de reset çağrılıyor
+          onRetry={handleReset}
           onClose={() => setShowWinModal(false)}
         />
       )}
+
+      {/* CONFETTI RAIN - Bölüm Sonu Kutlaması */}
+      <ConfettiRain
+        visible={showConfetti}
+        onComplete={() => setShowConfetti(false)}
+      />
 
     </LinearGradient>
   );
@@ -305,6 +430,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 40,
     width: '100%',
+    gap: 10,
+  },
+  levelBadge: {
+    paddingHorizontal: 20,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  levelText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
   },
   timerBadge: {
     flexDirection: 'row',
@@ -327,6 +467,23 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontVariant: ['tabular-nums'],
     letterSpacing: 1,
+  },
+  bestTimeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.3)',
+  },
+  bestTimeBadgeText: {
+    color: '#ffd700',
+    fontSize: 11,
+    fontWeight: '500',
+    marginLeft: 4,
+    fontVariant: ['tabular-nums'],
   },
   canvasContainer: {
     shadowColor: '#00fff2',
@@ -402,7 +559,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
 
-  // --- MODAL SYTLES ---
+  // --- MODAL STYLES ---
   modalOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
@@ -444,7 +601,14 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     letterSpacing: 1.5,
-    marginBottom: 10,
+    marginBottom: 15,
+  },
+  starsContainer: {
+    marginBottom: 15,
+  },
+  timeContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
   },
   scoreRow: {
     flexDirection: 'row',
@@ -453,13 +617,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     paddingVertical: 8,
     borderRadius: 15,
-    marginBottom: 20,
+    marginBottom: 8,
   },
   modalScore: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
     fontVariant: ['tabular-nums'],
+  },
+  newRecordBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 215, 0, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ffd700',
+  },
+  newRecordText: {
+    color: '#ffd700',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  bestTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  bestTimeText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
   },
   modalLine: {
     width: '100%',
