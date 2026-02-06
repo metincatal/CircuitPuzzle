@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View, Pressable, SafeAreaView, Dimensions, Platform, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { Zap, Play, RotateCcw, X, Clock, Trophy, Star } from 'lucide-react-native';
+import { Zap, Play, RotateCcw, X, Clock, Trophy, Star, Eye, ChevronLeft, ChevronRight } from 'lucide-react-native';
 
 import { CircuitCanvas } from './src/components/CircuitCanvas';
 import { Starfield } from './src/components/Starfield';
@@ -127,8 +127,14 @@ const WinModal: React.FC<WinModalProps> = ({
 export default function App() {
   const [level, setLevel] = useState<Level | null>(null);
 
+  // Seviye Geçmişi (Cache)
+  const levelHistory = useRef<Record<number, { level: Level, initialTiles: any[] }>>({});
+
   // Başlangıç Level'ını Sakla (Reset için)
   const [initialTiles, setInitialTiles] = useState<any[]>([]);
+
+  // Solution Reveal State
+  const [isSolutionVisible, setIsSolutionVisible] = useState(false);
 
   // Timer State
   const [seconds, setSeconds] = useState(0);
@@ -145,8 +151,8 @@ export default function App() {
   const [isNewRecord, setIsNewRecord] = useState(false);
   const [bestTime, setBestTime] = useState<number | null>(null);
 
-  // Seviye numarası (basit sayaç)
-  const [levelNumber, setLevelNumber] = useState(1);
+  // Seviye numarası (basit sayaç) - 0'dan başlıyoruz ki ilk açılışta 1 olsun
+  const [levelNumber, setLevelNumber] = useState(0);
 
   useEffect(() => {
     const init = async () => {
@@ -217,28 +223,68 @@ export default function App() {
     }
   }, [level?.isSolved]);
 
-  const startNewLevel = async () => {
+  const goToLevel = async (targetLevelNum: number) => {
+    // 1'den küçük level olamaz
+    if (targetLevelNum < 1) return;
+
     setShowWinModal(false);
     setShowConfetti(false);
     setIsNewRecord(false);
     setEarnedStars(0);
+    setIsSolutionVisible(false); // Yeni levela geçerken çözümü gizle
 
-    const newLevel = generateGridLevel();
+    // Geçmişte var mı?
+    if (levelHistory.current[targetLevelNum]) {
+      const cached = levelHistory.current[targetLevelNum];
+      // Deep copy to prevent mutating history when playing
+      const newTiles = JSON.parse(JSON.stringify(cached.initialTiles));
 
-    // Yeni Level'ı ve Initial State'i kaydet (Deep Copy önemli)
-    setLevel(newLevel);
-    setInitialTiles(JSON.parse(JSON.stringify(newLevel.tiles)));
+      // Calculate power flow for the fresh start
+      calculatePowerFlow(newTiles);
 
-    // Seviye numarasını artır
-    setLevelNumber(prev => prev + 1);
+      setLevel({
+        ...cached.level,
+        tiles: newTiles,
+        isSolved: false
+      });
+      setInitialTiles(JSON.parse(JSON.stringify(cached.initialTiles)));
+    } else {
+      // Yoksa yeni oluştur
+      const newLevel = generateGridLevel();
 
-    // Önceki rekor bilgisini getir
-    const record = await StorageManager.getLevelRecord(`level-${levelNumber + 1}`);
+      // Cache'e kaydet (Initial state olarak)
+      levelHistory.current[targetLevelNum] = {
+        level: newLevel,
+        initialTiles: JSON.parse(JSON.stringify(newLevel.tiles))
+      };
+
+      setLevel(newLevel);
+      setInitialTiles(JSON.parse(JSON.stringify(newLevel.tiles)));
+    }
+
+    setLevelNumber(targetLevelNum);
+
+    // Rekor bilgisini getir
+    const record = await StorageManager.getLevelRecord(`level-${targetLevelNum}`);
     setBestTime(record?.bestTime ?? null);
 
     // Timer Sıfırla ve Başlat
     setSeconds(0);
     setIsActiveTimer(true);
+  };
+
+  const startNewLevel = () => {
+    goToLevel(levelNumber + 1);
+  };
+
+  const handlePrevLevel = () => {
+    if (levelNumber > 1) {
+      goToLevel(levelNumber - 1);
+    }
+  };
+
+  const handleNextLevel = () => {
+    goToLevel(levelNumber + 1);
   };
 
   // SIFIRLA (RESET) Fonksiyonu
@@ -247,6 +293,7 @@ export default function App() {
 
     setShowWinModal(false); // Modalı kapa
     setShowConfetti(false); // Konfetiyi kapa
+    setIsSolutionVisible(false);
 
     // Mevcut tile'ları initial state'e döndür
     const resetTiles = JSON.parse(JSON.stringify(initialTiles));
@@ -265,8 +312,53 @@ export default function App() {
     setIsActiveTimer(true);
   };
 
+  // Çözümü Göster/Gizle
+  const toggleSolution = () => {
+    if (!level) return;
+
+    if (isSolutionVisible) {
+      // Çözümden çık - Oyuncunun kaldığı yere dönmesi gerekir ama 
+      // basitlik için şimdilik "görsel" bir toggle yapalım.
+      // Ekranda görünen level'ı değiştirmeden sadece render edilen prop'u değiştirmek daha iyi olurdu
+      // ama CircuitCanvas state tutmuyor, direkt level prop'unu render ediyor.
+      // Bu yüzden level state'ini geçici olarak değiştireceğiz ya da ikinci bir state kullanacağız.
+      // Ancak "toggle" denildiği için, basınca görünüp çekince gitmesi mi, yoksa aç/kapa mı?
+      // "Göz butonuna tıklayınca görünür olsun" -> Toggle varsayalım.
+
+      // Kolay yöntem: State'i geri yükle (veya zaten level state'i ana source of truth)
+      // Biz "Görüntüleme Modu" yapacağız.
+      setIsSolutionVisible(false);
+    } else {
+      setIsSolutionVisible(true);
+    }
+  };
+
+  // Render edilecek level (Çözüm modu aktifse çözülmüş hali)
+  const displayLevel = React.useMemo(() => {
+    if (!level) return null;
+
+    if (isSolutionVisible) {
+      // Çözülmüş kopyayı oluştur
+      const solvedTiles = level.tiles.map(t => ({
+        ...t,
+        rotation: t.solvedRotation, // Çözüm rotasyonuna getir
+        // isPowered hesaplanmalı (calculatePowerFlow ile)
+      }));
+
+      calculatePowerFlow(solvedTiles); // Hepsini powe eder muhtemelen
+
+      return {
+        ...level,
+        tiles: solvedTiles,
+        isSolved: true // Görsel olarak tamamlanmış görünsün
+      };
+    }
+
+    return level;
+  }, [level, isSolutionVisible]);
+
   const handleTilePress = useCallback((tileId: string) => {
-    if (!level || level.isSolved) return;
+    if (!level || level.isSolved || isSolutionVisible) return; // Çözüm görünürken oynanmaz
 
     // Dokunsal geri bildirim - Hafif tıklama
     HapticManager.lightTap();
@@ -295,7 +387,7 @@ export default function App() {
     });
   }, [level]);
 
-  if (!level) return <View style={styles.loading}><Text style={{ color: '#fff' }}>Yükleniyor...</Text></View>;
+  if (!displayLevel || !level) return <View style={styles.loading}><Text style={{ color: '#fff' }}>Yükleniyor...</Text></View>;
 
   return (
     <LinearGradient
@@ -311,15 +403,25 @@ export default function App() {
 
         {/* HEADER */}
         <View style={styles.header}>
-          {/* Seviye Numarası */}
-          <View style={styles.levelBadge}>
-            <Text style={styles.levelText}>LEVEL {levelNumber}</Text>
+          {/* Seviye Numarası ve Navigasyon */}
+          <View style={styles.levelNavContainer}>
+            <Pressable onPress={handlePrevLevel} style={({ pressed }) => [styles.navBtn, pressed && styles.opacity50, levelNumber <= 1 && styles.opacity20]} disabled={levelNumber <= 1}>
+              <ChevronLeft size={24} color="#fff" />
+            </Pressable>
+
+            <View style={styles.levelBadge}>
+              <Text style={styles.levelText}>LEVEL {levelNumber}</Text>
+            </View>
+
+            <Pressable onPress={handleNextLevel} style={({ pressed }) => [styles.navBtn, pressed && styles.opacity50]}>
+              <ChevronRight size={24} color="#fff" />
+            </Pressable>
           </View>
 
           {/* Timer Rozeti */}
-          <View style={[styles.timerBadge, level.isSolved && styles.timerBadgeSuccess]}>
-            <Clock size={14} color={level.isSolved ? "#2ecc71" : "rgba(255,255,255,0.6)"} />
-            <Text style={[styles.timerText, level.isSolved && { color: '#2ecc71' }]}>
+          <View style={[styles.timerBadge, displayLevel.isSolved && styles.timerBadgeSuccess]}>
+            <Clock size={14} color={displayLevel.isSolved ? "#2ecc71" : "rgba(255,255,255,0.6)"} />
+            <Text style={[styles.timerText, displayLevel.isSolved && { color: '#2ecc71' }]}>
               {formatTime(seconds)}
             </Text>
           </View>
@@ -339,28 +441,41 @@ export default function App() {
           { shadowOpacity: level.isSolved ? 0.6 : 0.1 }
         ]}>
           <CircuitCanvas
-            level={level}
+            level={displayLevel}
             onTilePress={handleTilePress}
           />
         </View>
 
         {/* FOOTER & CONTROLS */}
         <View style={styles.footer}>
-          {/* Oyun Devam Ediyorsa */}
+          {/* Oyun Devam Ediyorsa veya Çözüm Modu Açıksa */}
           {!level.isSolved && (
             <>
               <Text style={styles.instruction}>
-                Akışı sağlamak için parçaları döndür.
+                {isSolutionVisible ? 'Çözüm Modu Aktif' : 'Akışı sağlamak için parçaları döndür.'}
               </Text>
 
-              {/* SIFIRLA BUTONU */}
-              <Pressable
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-                onPress={handleReset}
-              >
-                <RotateCcw size={16} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.buttonText}>SIFIRLA</Text>
-              </Pressable>
+              <View style={styles.controlsRow}>
+                {/* ÇÖZÜM BUTONU */}
+                <Pressable
+                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed, isSolutionVisible && styles.activeButton]}
+                  onPress={toggleSolution}
+                >
+                  <Eye size={24} color={isSolutionVisible ? "#00fff2" : "rgba(255,255,255,0.6)"} />
+                </Pressable>
+
+                {/* SIFIRLA BUTONU */}
+                <Pressable
+                  style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+                  onPress={handleReset}
+                >
+                  <RotateCcw size={16} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.buttonText}>SIFIRLA</Text>
+                </Pressable>
+
+                {/* Dengelemek için boş view */}
+                <View style={{ width: 50 }} />
+              </View>
             </>
           )}
 
@@ -431,6 +546,20 @@ const styles = StyleSheet.create({
     marginTop: 40,
     width: '100%',
     gap: 10,
+  },
+  levelNavContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  navBtn: {
+    padding: 8,
+  },
+  opacity50: {
+    opacity: 0.5
+  },
+  opacity20: {
+    opacity: 0.2
   },
   levelBadge: {
     paddingHorizontal: 20,
@@ -522,6 +651,28 @@ const styles = StyleSheet.create({
   buttonPressed: {
     backgroundColor: 'rgba(255,255,255,0.15)',
     opacity: 0.8,
+  },
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between', // Veya space-around
+    width: '100%',
+    paddingHorizontal: 30,
+    gap: 20
+  },
+  iconButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  activeButton: {
+    backgroundColor: 'rgba(0, 255, 242, 0.15)', // Glow rengi
+    borderColor: '#00fff2',
   },
 
   // --- WIN CONTROLS (Footer) ---

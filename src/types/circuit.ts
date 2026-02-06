@@ -28,6 +28,7 @@ export interface Tile {
     position: GridPos;
     type: TileType;
     rotation: number; // 0, 1, 2, 3 (x90 derece)
+    solvedRotation: number; // Çözüm için gereken rotasyon
     baseConnections: Connections; // Rotasyonsuz orijinal bağlantılar
     isPowered: boolean;
     fixed: boolean; // Source döndürülemez
@@ -235,6 +236,7 @@ export const generateGridLevel = (): Level => {
                 position: { row: r, col: c },
                 type: type,
                 rotation: isFixed ? solvedRotation : randomRot,
+                solvedRotation: solvedRotation,
                 baseConnections: finalBaseConnections,
                 isPowered: type === 'source',
                 fixed: isFixed
