@@ -1,21 +1,23 @@
 /**
- * Circuit Puzzle - Grid Tabanlı Sistem
- * 
+ * Circuit Puzzle - Grid Tabanlı Sistem v2
+ *
  * MİMARİ:
- * - 5x6 Grid Sistemi
- * - Parçalar "Lego" gibi kenar-kenar bağlanır
+ * - Kademeli grid boyutu (5x6 → 8x9)
+ * - Bridge (crossover) parça desteği
+ * - Multi-structure (çoklu yapı) desteği
  * - Spanning Tree algoritması ile garantili çözüm
- * - Görsel bütünlük için "Eritilmiş Neon" efekti
+ * - Loop tarzı minimal tasarım
  */
 
-export type TileType = 'source' | 'bulb' | 'empty' | 'line' | 'corner' | 't-shape' | 'cross';
+export type TileType = 'source' | 'bulb' | 'empty' | 'line' | 'corner' | 't-shape' | 'cross' | 'bridge';
+
+export type Direction = 'top' | 'right' | 'bottom' | 'left';
 
 export interface GridPos {
     row: number;
     col: number;
 }
 
-// 4 Yönlü bağlantı
 export interface Connections {
     top: boolean;
     right: boolean;
@@ -23,15 +25,24 @@ export interface Connections {
     left: boolean;
 }
 
+export interface BridgePaths {
+    pathA: [Direction, Direction];
+    pathB: [Direction, Direction];
+}
+
 export interface Tile {
     id: string;
     position: GridPos;
     type: TileType;
     rotation: number; // 0, 1, 2, 3 (x90 derece)
-    solvedRotation: number; // Çözüm için gereken rotasyon
-    baseConnections: Connections; // Rotasyonsuz orijinal bağlantılar
+    solvedRotation: number;
+    baseConnections: Connections;
     isPowered: boolean;
-    fixed: boolean; // Source döndürülemez
+    fixed: boolean;
+    structureId?: number;
+    bridgePaths?: BridgePaths;
+    bridgePathAPowered?: boolean;
+    bridgePathBPowered?: boolean;
 }
 
 export interface Level {
@@ -40,24 +51,52 @@ export interface Level {
     cols: number;
     tiles: Tile[];
     isSolved: boolean;
+    structureCount: number;
 }
 
 // ============= YARDIMCI FONKSİYONLAR =============
 
 export const generateId = (): string => Math.random().toString(36).substring(2, 9);
 
+const OPPOSITE: Record<Direction, Direction> = {
+    top: 'bottom',
+    bottom: 'top',
+    left: 'right',
+    right: 'left',
+};
+
+const DIR_OFFSETS: Record<Direction, { dr: number; dc: number }> = {
+    top: { dr: -1, dc: 0 },
+    right: { dr: 0, dc: 1 },
+    bottom: { dr: 1, dc: 0 },
+    left: { dr: 0, dc: -1 },
+};
+
+/**
+ * Bir yönü saat yönünde belirli adım kadar döndür
+ */
+const rotateDirection = (dir: Direction, steps: number): Direction => {
+    const dirs: Direction[] = ['top', 'right', 'bottom', 'left'];
+    const idx = dirs.indexOf(dir);
+    return dirs[(idx + steps) % 4];
+};
+
 /**
  * Bir tile'ın şu anki rotasyonuna göre aktif bağlantılarını hesapla
  */
 export const getActiveConnections = (tile: Tile): Connections => {
-    const { top, right, bottom, left } = tile.baseConnections;
-    // Saat yönünde döndür
-    // 0: T R B L
-    // 1: L T R B
-    // 2: B L T R
-    // 3: R B L T
+    if (tile.type === 'bridge') {
+        // Bridge: her zaman 4 yön aktif (iki bağımsız path)
+        const paths = getActiveBridgePaths(tile);
+        return {
+            top: false || paths.pathA.includes('top') || paths.pathB.includes('top'),
+            right: false || paths.pathA.includes('right') || paths.pathB.includes('right'),
+            bottom: false || paths.pathA.includes('bottom') || paths.pathB.includes('bottom'),
+            left: false || paths.pathA.includes('left') || paths.pathB.includes('left'),
+        };
+    }
 
-    // Basit bir kaydırma mantığı
+    const { top, right, bottom, left } = tile.baseConnections;
     const conns = [top, right, bottom, left];
     const rotated = [false, false, false, false];
 
@@ -69,7 +108,22 @@ export const getActiveConnections = (tile: Tile): Connections => {
         top: rotated[0],
         right: rotated[1],
         bottom: rotated[2],
-        left: rotated[3]
+        left: rotated[3],
+    };
+};
+
+/**
+ * Bridge parçasının döndürülmüş yollarını hesapla
+ */
+export const getActiveBridgePaths = (tile: Tile): { pathA: [Direction, Direction]; pathB: [Direction, Direction] } => {
+    if (!tile.bridgePaths) {
+        return { pathA: ['top', 'bottom'], pathB: ['left', 'right'] };
+    }
+
+    const { pathA, pathB } = tile.bridgePaths;
+    return {
+        pathA: [rotateDirection(pathA[0], tile.rotation), rotateDirection(pathA[1], tile.rotation)],
+        pathB: [rotateDirection(pathB[0], tile.rotation), rotateDirection(pathB[1], tile.rotation)],
     };
 };
 
@@ -80,276 +134,559 @@ export const getTileAt = (tiles: Tile[], row: number, col: number): Tile | undef
     return tiles.find(t => t.position.row === row && t.position.col === col);
 };
 
-// ============= SEVİYE ÜRETİCİ (Spanning Tree) =============
+// ============= KADEMELİ ZORLUK AYARLARI =============
 
-const ROWS = 6;
-const COLS = 5;
+interface DifficultyConfig {
+    rows: number;
+    cols: number;
+    structureCount: number;
+    bridgeChance: number;
+    fixedChance: number;
+}
+
+const getDifficultyConfig = (levelNumber: number): DifficultyConfig => {
+    if (levelNumber <= 5) {
+        return { rows: 6, cols: 5, structureCount: 1, bridgeChance: 0, fixedChance: 0 };
+    } else if (levelNumber <= 15) {
+        return { rows: 7, cols: 6, structureCount: 1, bridgeChance: 0.15, fixedChance: 0 };
+    } else if (levelNumber <= 30) {
+        return { rows: 8, cols: 7, structureCount: 2, bridgeChance: 0.20, fixedChance: 0 };
+    } else {
+        return { rows: 9, cols: 8, structureCount: 2 + (levelNumber > 50 ? 1 : 0), bridgeChance: 0.25, fixedChance: 0.10 };
+    }
+};
+
+// ============= GRİD BÖLGELEME (Multi-Structure) =============
+
+const partitionGrid = (rows: number, cols: number, structureCount: number): number[][] => {
+    const grid = Array(rows).fill(null).map(() => Array(cols).fill(-1));
+
+    if (structureCount <= 1) {
+        // Tek yapı: tümü 0
+        for (let r = 0; r < rows; r++)
+            for (let c = 0; c < cols; c++)
+                grid[r][c] = 0;
+        return grid;
+    }
+
+    // Seed noktalarını belirle (Manhattan mesafe ≥ 3)
+    const seeds: GridPos[] = [];
+    let attempts = 0;
+    while (seeds.length < structureCount && attempts < 200) {
+        attempts++;
+        const r = Math.floor(Math.random() * rows);
+        const c = Math.floor(Math.random() * cols);
+
+        const tooClose = seeds.some(s =>
+            Math.abs(s.row - r) + Math.abs(s.col - c) < 3
+        );
+        if (!tooClose) {
+            seeds.push({ row: r, col: c });
+        }
+    }
+
+    // Seed bulunamadıysa fallback
+    if (seeds.length < structureCount) {
+        for (let r = 0; r < rows; r++)
+            for (let c = 0; c < cols; c++)
+                grid[r][c] = 0;
+        return grid;
+    }
+
+    // BFS ile Voronoi benzeri bölgelere ayır
+    const queue: { pos: GridPos; id: number }[] = [];
+    seeds.forEach((s, i) => {
+        grid[s.row][s.col] = i;
+        queue.push({ pos: s, id: i });
+    });
+
+    const dirs = [[-1, 0], [0, 1], [1, 0], [0, -1]];
+
+    // Shuffle queue her adımda - fair expansion
+    let idx = 0;
+    while (idx < queue.length) {
+        const { pos, id } = queue[idx];
+        idx++;
+
+        for (const [dr, dc] of dirs) {
+            const nr = pos.row + dr;
+            const nc = pos.col + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && grid[nr][nc] === -1) {
+                grid[nr][nc] = id;
+                queue.push({ pos: { row: nr, col: nc }, id });
+            }
+        }
+    }
+
+    return grid;
+};
+
+// ============= SEVİYE ÜRETİCİ =============
 
 /**
- * Recursive Backtracker ile mükemmel labirent/ağ oluştur
+ * Tek bir bölge için spanning tree oluştur
  */
-export const generateGridLevel = (): Level => {
-    // 1. Grid'i hazırla (hepsi boş)
-    const tiles: Tile[] = [];
+const generateSpanningTree = (
+    rows: number,
+    cols: number,
+    regionGrid: number[][],
+    regionId: number,
+    sourcePos: GridPos,
+): Map<string, Connections> => {
+    const connectionMap = new Map<string, Connections>();
 
-    // Ziyaret edilenler matrisi
-    const visited = Array(ROWS).fill(null).map(() => Array(COLS).fill(false));
+    // Bölgeye ait hücreleri bul
+    const regionCells = new Set<string>();
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            if (regionGrid[r][c] === regionId) {
+                regionCells.add(`${r},${c}`);
+                connectionMap.set(`${r},${c}`, { top: false, right: false, bottom: false, left: false });
+            }
+        }
+    }
 
-    // Bağlantı matrisi (Hangi hücre hangisine bağlı)
-    const connectionMatrix = Array(ROWS).fill(null).map(() =>
-        Array(COLS).fill(null).map(() => ({ top: false, right: false, bottom: false, left: false }))
-    );
+    // DFS (Recursive Backtracker)
+    const visited = new Set<string>();
+    const stack: GridPos[] = [sourcePos];
+    visited.add(`${sourcePos.row},${sourcePos.col}`);
 
-    // 2. Rastgele bir başlangıç noktası seç (Genelde üst orta source olsun)
-    const startRow = 0;
-    const startCol = Math.floor(COLS / 2);
-
-    // Stack tabanlı DFS
-    const stack: GridPos[] = [{ row: startRow, col: startCol }];
-    visited[startRow][startCol] = true;
+    const dirList: { dr: number; dc: number; dir: Direction; opp: Direction }[] = [
+        { dr: -1, dc: 0, dir: 'top', opp: 'bottom' },
+        { dr: 0, dc: 1, dir: 'right', opp: 'left' },
+        { dr: 1, dc: 0, dir: 'bottom', opp: 'top' },
+        { dr: 0, dc: -1, dir: 'left', opp: 'right' },
+    ];
 
     while (stack.length > 0) {
         const current = stack[stack.length - 1];
+        const key = `${current.row},${current.col}`;
 
-        // Komşuları bul (N, E, S, W)
-        const neighbors: { pos: GridPos, dir: string }[] = [];
+        // Ziyaret edilmemiş komşuları bul
+        const neighbors: { pos: GridPos; dir: Direction; opp: Direction }[] = [];
 
-        // Top
-        if (current.row > 0 && !visited[current.row - 1][current.col])
-            neighbors.push({ pos: { row: current.row - 1, col: current.col }, dir: 'top' });
-        // Right
-        if (current.col < COLS - 1 && !visited[current.row][current.col + 1])
-            neighbors.push({ pos: { row: current.row, col: current.col + 1 }, dir: 'right' });
-        // Bottom
-        if (current.row < ROWS - 1 && !visited[current.row + 1][current.col])
-            neighbors.push({ pos: { row: current.row + 1, col: current.col }, dir: 'bottom' });
-        // Left
-        if (current.col > 0 && !visited[current.row][current.col - 1])
-            neighbors.push({ pos: { row: current.row, col: current.col - 1 }, dir: 'left' });
+        for (const d of dirList) {
+            const nr = current.row + d.dr;
+            const nc = current.col + d.dc;
+            const nKey = `${nr},${nc}`;
+            if (regionCells.has(nKey) && !visited.has(nKey)) {
+                neighbors.push({ pos: { row: nr, col: nc }, dir: d.dir, opp: d.opp });
+            }
+        }
 
         if (neighbors.length > 0) {
-            // Rastgele bir komşu seç
             const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+            const nextKey = `${next.pos.row},${next.pos.col}`;
 
-            // Duvarı yık (bağlantı kur)
-            if (next.dir === 'top') {
-                connectionMatrix[current.row][current.col].top = true;
-                connectionMatrix[next.pos.row][next.pos.col].bottom = true;
-            } else if (next.dir === 'right') {
-                connectionMatrix[current.row][current.col].right = true;
-                connectionMatrix[next.pos.row][next.pos.col].left = true;
-            } else if (next.dir === 'bottom') {
-                connectionMatrix[current.row][current.col].bottom = true;
-                connectionMatrix[next.pos.row][next.pos.col].top = true;
-            } else if (next.dir === 'left') {
-                connectionMatrix[current.row][current.col].left = true;
-                connectionMatrix[next.pos.row][next.pos.col].right = true;
-            }
+            // Bağlantı kur
+            const currentConns = connectionMap.get(key)!;
+            currentConns[next.dir] = true;
 
-            visited[next.pos.row][next.pos.col] = true;
+            const nextConns = connectionMap.get(nextKey)!;
+            nextConns[next.opp] = true;
+
+            visited.add(nextKey);
             stack.push(next.pos);
         } else {
             stack.pop();
         }
     }
 
-    // 3. Matrise göre Tile Objelerini oluştur
-    for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-            const conns = connectionMatrix[r][c];
-            const connCount = (conns.top ? 1 : 0) + (conns.right ? 1 : 0) + (conns.bottom ? 1 : 0) + (conns.left ? 1 : 0);
+    return connectionMap;
+};
 
-            // Eğer hiç bağlantı yoksa boş geç (ama spanning tree'de genelde olmaz, sadece izole kalırsa)
+/**
+ * Bağlantı sayısına göre tile tipini belirle
+ */
+const determineTileType = (conns: Connections, isSource: boolean): TileType => {
+    const count = (conns.top ? 1 : 0) + (conns.right ? 1 : 0) + (conns.bottom ? 1 : 0) + (conns.left ? 1 : 0);
+
+    if (count === 0) return 'empty';
+    if (isSource) return 'source';
+    if (count === 1) return 'bulb';
+    if (count === 2) {
+        if ((conns.top && conns.bottom) || (conns.left && conns.right)) return 'line';
+        return 'corner';
+    }
+    if (count === 3) return 't-shape';
+    return 'cross';
+};
+
+/**
+ * Canonical base connections (şeklin standart hali)
+ */
+const getCanonicalConnections = (type: TileType): Connections => {
+    switch (type) {
+        case 'source':
+        case 'bulb':
+            return { top: false, bottom: true, right: false, left: false };
+        case 'line':
+            return { top: true, bottom: true, right: false, left: false };
+        case 'corner':
+            return { top: true, right: true, bottom: false, left: false };
+        case 't-shape':
+            return { top: false, right: true, bottom: true, left: true };
+        case 'cross':
+            return { top: true, right: true, bottom: true, left: true };
+        case 'bridge':
+            return { top: true, right: true, bottom: true, left: true };
+        default:
+            return { top: false, right: false, bottom: false, left: false };
+    }
+};
+
+/**
+ * Gerçek bağlantılara uygun solvedRotation hesapla
+ */
+const findSolvedRotation = (baseConns: Connections, targetConns: Connections): number => {
+    for (let rot = 0; rot < 4; rot++) {
+        const conns = [baseConns.top, baseConns.right, baseConns.bottom, baseConns.left];
+        const rotated = [false, false, false, false];
+        for (let i = 0; i < 4; i++) {
+            rotated[(i + rot) % 4] = conns[i];
+        }
+
+        if (
+            rotated[0] === targetConns.top &&
+            rotated[1] === targetConns.right &&
+            rotated[2] === targetConns.bottom &&
+            rotated[3] === targetConns.left
+        ) {
+            return rot;
+        }
+    }
+    return 0;
+};
+
+/**
+ * Bazı line parçalarını bridge'e dönüştür
+ */
+const convertToBridges = (tiles: Tile[], bridgeChance: number, rows: number, cols: number): void => {
+    if (bridgeChance <= 0) return;
+
+    // Tile map oluştur
+    const tileMap = new Map<string, Tile>();
+    tiles.forEach(t => tileMap.set(`${t.position.row},${t.position.col}`, t));
+
+    // Line parçalarını bul (düz çizgi - karşılıklı 2 bağlantı)
+    const lineTiles = tiles.filter(t => t.type === 'line');
+
+    for (const tile of lineTiles) {
+        if (Math.random() > bridgeChance) continue;
+
+        const r = tile.position.row;
+        const c = tile.position.col;
+
+        // Bu line'ın aktif yönlerini bul (solved rotation ile)
+        const testTile = { ...tile, rotation: tile.solvedRotation } as Tile;
+        const activeConns = getActiveConnections(testTile);
+
+        // Dikey mi yatay mı?
+        let perpDirs: [Direction, Direction];
+        if (activeConns.top && activeConns.bottom) {
+            perpDirs = ['left', 'right'];
+        } else if (activeConns.left && activeConns.right) {
+            perpDirs = ['top', 'bottom'];
+        } else {
+            continue;
+        }
+
+        // Perpendicular yönlerde komşu var mı?
+        const off1 = DIR_OFFSETS[perpDirs[0]];
+        const off2 = DIR_OFFSETS[perpDirs[1]];
+        const n1 = tileMap.get(`${r + off1.dr},${c + off1.dc}`);
+        const n2 = tileMap.get(`${r + off2.dr},${c + off2.dc}`);
+
+        // İki perpendicular komşu da varsa bridge yapabiliriz
+        if (n1 && n2 && n1.type !== 'source' && n2.type !== 'source' && n1.type !== 'bridge' && n2.type !== 'bridge') {
+            // Mevcut line'ı bridge'e dönüştür
+            let pathA: [Direction, Direction];
+            let pathB: [Direction, Direction];
+
+            if (activeConns.top && activeConns.bottom) {
+                pathA = ['top', 'bottom'];
+                pathB = ['left', 'right'];
+            } else {
+                pathA = ['left', 'right'];
+                pathB = ['top', 'bottom'];
+            }
+
+            tile.type = 'bridge';
+            tile.bridgePaths = { pathA, pathB };
+            tile.baseConnections = { top: true, right: true, bottom: true, left: true };
+
+            // pathB yönlerindeki komşulara bağlantı ekle
+            const n1Conns = getActiveConnections({ ...n1, rotation: n1.solvedRotation } as Tile);
+            const n2Conns = getActiveConnections({ ...n2, rotation: n2.solvedRotation } as Tile);
+
+            // Komşu 1'e bridge yönünden bağlantı ekle
+            const oppDir1 = OPPOSITE[perpDirs[0]];
+            if (!n1Conns[oppDir1]) {
+                // Komşunun bağlantısını güncelle
+                addConnectionToTile(n1, oppDir1);
+            }
+
+            // Komşu 2'ye bridge yönünden bağlantı ekle
+            const oppDir2 = OPPOSITE[perpDirs[1]];
+            if (!n2Conns[oppDir2]) {
+                addConnectionToTile(n2, oppDir2);
+            }
+
+            // Bridge'in solved rotation'ı: pathA orijinal halde top-bottom ise ve gerçek de top-bottom ise 0
+            tile.solvedRotation = 0; // Bridge base hali zaten doğru yönde
+        }
+    }
+};
+
+/**
+ * Bir tile'a yeni bir yön bağlantısı ekle (tipini güncelle)
+ */
+const addConnectionToTile = (tile: Tile, dir: Direction): void => {
+    // Mevcut solved rotation'daki aktif bağlantıları bul
+    const testTile = { ...tile, rotation: tile.solvedRotation } as Tile;
+    const currentConns = getActiveConnections(testTile);
+
+    // Yeni bağlantıyı ekle
+    const newConns: Connections = { ...currentConns, [dir]: true };
+    const count = (newConns.top ? 1 : 0) + (newConns.right ? 1 : 0) + (newConns.bottom ? 1 : 0) + (newConns.left ? 1 : 0);
+
+    // Yeni tipi belirle
+    let newType: TileType = tile.type;
+    if (count === 2) {
+        if ((newConns.top && newConns.bottom) || (newConns.left && newConns.right)) newType = 'line';
+        else newType = 'corner';
+    } else if (count === 3) {
+        newType = 't-shape';
+    } else if (count === 4) {
+        newType = 'cross';
+    }
+
+    tile.type = newType;
+    const newBase = getCanonicalConnections(newType);
+    tile.baseConnections = newBase;
+    tile.solvedRotation = findSolvedRotation(newBase, newConns);
+};
+
+/**
+ * Ana level üretici
+ */
+export const generateGridLevel = (levelNumber: number = 1): Level => {
+    const config = getDifficultyConfig(levelNumber);
+    const { rows, cols, structureCount, bridgeChance, fixedChance } = config;
+
+    // Grid bölgeleme
+    const regionGrid = partitionGrid(rows, cols, structureCount);
+
+    // Her bölge için source pozisyonu bul
+    const regionSources: GridPos[] = [];
+    for (let i = 0; i < structureCount; i++) {
+        // Bölgenin hücrelerini bul
+        const cells: GridPos[] = [];
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                if (regionGrid[r][c] === i) {
+                    cells.push({ row: r, col: c });
+                }
+            }
+        }
+        if (cells.length > 0) {
+            // Ortaya yakın bir hücre seç
+            const centerR = cells.reduce((s, c) => s + c.row, 0) / cells.length;
+            const centerC = cells.reduce((s, c) => s + c.col, 0) / cells.length;
+            cells.sort((a, b) => {
+                const distA = Math.abs(a.row - centerR) + Math.abs(a.col - centerC);
+                const distB = Math.abs(b.row - centerR) + Math.abs(b.col - centerC);
+                return distA - distB;
+            });
+            regionSources.push(cells[0]);
+        }
+    }
+
+    // Her bölge için spanning tree
+    const allConnectionMaps: Map<string, Connections>[] = [];
+    for (let i = 0; i < regionSources.length; i++) {
+        const connMap = generateSpanningTree(rows, cols, regionGrid, i, regionSources[i]);
+        allConnectionMaps.push(connMap);
+    }
+
+    // Tile'ları oluştur
+    const tiles: Tile[] = [];
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const regionId = regionGrid[r][c];
+            if (regionId < 0) continue;
+
+            const key = `${r},${c}`;
+            const connMap = allConnectionMaps[regionId];
+            const conns = connMap?.get(key);
+
+            if (!conns) continue;
+
+            const connCount = (conns.top ? 1 : 0) + (conns.right ? 1 : 0) + (conns.bottom ? 1 : 0) + (conns.left ? 1 : 0);
             if (connCount === 0) continue;
 
-            let type: TileType = 'line';
-            let rotation = 0;
-            let baseConns = { ...conns };
+            const isSource = regionSources[regionId].row === r && regionSources[regionId].col === c;
+            const type = determineTileType(conns, isSource);
+            const baseConns = getCanonicalConnections(type);
+            const solvedRotation = findSolvedRotation(baseConns, conns);
 
-            // Tipi belirle
-            if (r === startRow && c === startCol) {
-                type = 'source';
-                // Source genelde tek çıkışlıdır, spanning tree sayesinde zaten öyle olabilir
-                // Ama görsel olarak 'source' tipini koruyalım
-            } else if (connCount === 1) {
-                type = 'bulb'; // Uç noktalar lamba
-            } else if (connCount === 2) {
-                if ((conns.top && conns.bottom) || (conns.left && conns.right)) {
-                    type = 'line';
-                } else {
-                    type = 'corner';
-                }
-            } else if (connCount === 3) {
-                type = 't-shape';
-            } else if (connCount === 4) {
-                type = 'cross';
-            }
-
-            // BULB ve SOURCE için base bağlantıları düzelt (her zaman Bottom'a baksın, biz döndürelim)
-            // Bu kısım önemli: Tile'ın "varsayılan" hali ile "gereken" hali arasındaki fark rotasyondur.
-            // Şimdilik basitlik için: Spanning tree'den gelen bağlantıları "base" olarak kabul edelim
-            // Ve rastgele bir rotasyon ekleyelim. Base'i de o rotasyonun tersi kadar döndürelim?
-            // HAYIR. BaseConnection "şeklin kendisi"dir.
-            // Örneğin DÜZ ÇİZGİ'nin base'i Top-Bottom'dur.
-
-            let finalBaseConnections = { top: false, right: false, bottom: false, left: false };
-
-            // Şekil tiplerinin canonical (standart) halleri:
-            if (type === 'line') {
-                finalBaseConnections = { top: true, bottom: true, right: false, left: false };
-            } else if (type === 'corner') {
-                finalBaseConnections = { top: true, right: true, bottom: false, left: false }; // L şekli
-            } else if (type === 't-shape') {
-                finalBaseConnections = { top: false, right: true, bottom: true, left: true }; // T şekli (Aşağı bakan)
-            } else if (type === 'cross') {
-                finalBaseConnections = { top: true, right: true, bottom: true, left: true };
-            } else if (type === 'source' || type === 'bulb') {
-                finalBaseConnections = { top: false, bottom: true, right: false, left: false }; // Tek uçlu
-            }
-
-            // Şimdi bu canonical şekli, matrixtteki duruma uydurmak için ne kadar döndürmeliyiz?
-            // Bu "Çözülmüş Rotasyon"dur.
-            let solvedRotation = 0;
-
-            // Brute-force ile doğru rotasyonu bul
-            for (let rot = 0; rot < 4; rot++) {
-                const testTile = { baseConnections: finalBaseConnections, rotation: rot } as Tile;
-                const active = getActiveConnections(testTile);
-
-                if (active.top === conns.top &&
-                    active.right === conns.right &&
-                    active.bottom === conns.bottom &&
-                    active.left === conns.left) {
-                    solvedRotation = rot;
-                    break;
-                }
-            }
-
-            // Şimdi rastgele bir başlangıç rotasyonu ver (Kullanıcı çözecek)
+            // Rastgele başlangıç rotasyonu
             const randomRot = Math.floor(Math.random() * 4);
-
-            // Source sabit kalsın istiyorsak:
-            const isFixed = (type === 'source');
+            const isFixed = type === 'source' || (fixedChance > 0 && !isSource && Math.random() < fixedChance);
 
             tiles.push({
                 id: generateId(),
                 position: { row: r, col: c },
-                type: type,
+                type,
                 rotation: isFixed ? solvedRotation : randomRot,
-                solvedRotation: solvedRotation,
-                baseConnections: finalBaseConnections,
+                solvedRotation,
+                baseConnections: baseConns,
                 isPowered: type === 'source',
-                fixed: isFixed
+                fixed: isFixed,
+                structureId: regionId,
             });
         }
     }
 
-    // Güç akışını hesapla (ilk durum için)
+    // Bridge dönüşümü
+    if (bridgeChance > 0) {
+        convertToBridges(tiles, bridgeChance, rows, cols);
+    }
+
+    // Güç akışını hesapla
     calculatePowerFlow(tiles);
 
     return {
         id: generateId(),
-        rows: ROWS,
-        cols: COLS,
+        rows,
+        cols,
         tiles,
-        isSolved: false
+        isSolved: false,
+        structureCount,
     };
 };
 
+// ============= GÜÇ AKIŞI (Bridge-aware BFS) =============
+
 /**
  * Bağlantı mantığını ve güç akışını kontrol et
+ * Bridge parçalar için path-bazlı akış
  */
 export const calculatePowerFlow = (tiles: Tile[]): void => {
-    // 1. Herkesi resetle
-    tiles.forEach(t => t.isPowered = (t.type === 'source'));
-
-    // 2. BFS
-    const queue: Tile[] = tiles.filter(t => t.type === 'source');
-    const visited = new Set<string>(queue.map(t => t.id));
+    // Herkesi resetle
+    tiles.forEach(t => {
+        t.isPowered = (t.type === 'source');
+        if (t.type === 'bridge') {
+            t.bridgePathAPowered = false;
+            t.bridgePathBPowered = false;
+        }
+    });
 
     // Hızlı erişim için map
     const tileMap = new Map<string, Tile>();
     tiles.forEach(t => tileMap.set(`${t.position.row},${t.position.col}`, t));
 
+    // BFS queue: { tile, entryDirection (source'dan null) }
+    interface QueueItem {
+        tile: Tile;
+        entryDirection: Direction | null;
+    }
+
+    const queue: QueueItem[] = tiles
+        .filter(t => t.type === 'source')
+        .map(t => ({ tile: t, entryDirection: null as Direction | null }));
+
+    // Visited tracking: normal tile -> tile.id, bridge -> tile.id-entryDirection
+    const visited = new Set<string>();
+    queue.forEach(q => visited.add(q.tile.id));
+
+    const directions: { dir: Direction; dr: number; dc: number }[] = [
+        { dir: 'top', dr: -1, dc: 0 },
+        { dir: 'right', dr: 0, dc: 1 },
+        { dir: 'bottom', dr: 1, dc: 0 },
+        { dir: 'left', dr: 0, dc: -1 },
+    ];
+
     while (queue.length > 0) {
-        const current = queue.shift()!;
+        const { tile: current, entryDirection } = queue.shift()!;
         const r = current.position.row;
         const c = current.position.col;
-        const conns = getActiveConnections(current);
 
-        // Komşuları kontrol et
-        const directions = [
-            { r: -1, c: 0, dir: 'top', opp: 'bottom' },
-            { r: 0, c: 1, dir: 'right', opp: 'left' },
-            { r: 1, c: 0, dir: 'bottom', opp: 'top' },
-            { r: 0, c: -1, dir: 'left', opp: 'right' }
-        ];
+        if (current.type === 'bridge') {
+            // Bridge: sadece aynı path'teki eşleşen yönden çıkış
+            const paths = getActiveBridgePaths(current);
 
-        for (const d of directions) {
-            // Benim bu yönde çıkışım var mı?
-            if (!conns[d.dir as keyof Connections]) continue;
+            let exitDirs: Direction[] = [];
 
-            // Komşu var mı?
-            const neighbor = tileMap.get(`${r + d.r},${c + d.c}`);
-            if (!neighbor) continue;
+            if (entryDirection === null) {
+                // Source'dan gelindi (olmaz normalde ama safety)
+                exitDirs = [...paths.pathA, ...paths.pathB];
+            } else {
+                // Hangi path'ten girdik?
+                if (paths.pathA.includes(entryDirection)) {
+                    exitDirs = paths.pathA.filter(d => d !== entryDirection);
+                    current.bridgePathAPowered = true;
+                } else if (paths.pathB.includes(entryDirection)) {
+                    exitDirs = paths.pathB.filter(d => d !== entryDirection);
+                    current.bridgePathBPowered = true;
+                }
+            }
 
-            // Komşunun bana girişi var mı?
-            const neighborConns = getActiveConnections(neighbor);
-            if (neighborConns[d.opp as keyof Connections]) {
-                // Bağlantı var!
-                if (!visited.has(neighbor.id)) {
+            for (const exitDir of exitDirs) {
+                const d = directions.find(dd => dd.dir === exitDir)!;
+                const neighbor = tileMap.get(`${r + d.dr},${c + d.dc}`);
+                if (!neighbor) continue;
+
+                const neighborConns = getActiveConnections(neighbor);
+                const oppDir = OPPOSITE[exitDir];
+                if (!neighborConns[oppDir]) continue;
+
+                const visitKey = neighbor.type === 'bridge'
+                    ? `${neighbor.id}-${oppDir}`
+                    : neighbor.id;
+
+                if (!visited.has(visitKey)) {
                     neighbor.isPowered = true;
-                    visited.add(neighbor.id);
-                    queue.push(neighbor);
+                    visited.add(visitKey);
+                    queue.push({ tile: neighbor, entryDirection: oppDir });
+                }
+            }
+        } else {
+            // Normal parça: tüm aktif yönlerden çıkış
+            const conns = getActiveConnections(current);
+
+            for (const d of directions) {
+                if (!conns[d.dir]) continue;
+
+                const neighbor = tileMap.get(`${r + d.dr},${c + d.dc}`);
+                if (!neighbor) continue;
+
+                const neighborConns = getActiveConnections(neighbor);
+                const oppDir = OPPOSITE[d.dir];
+                if (!neighborConns[oppDir]) continue;
+
+                const visitKey = neighbor.type === 'bridge'
+                    ? `${neighbor.id}-${oppDir}`
+                    : neighbor.id;
+
+                if (!visited.has(visitKey)) {
+                    neighbor.isPowered = true;
+                    visited.add(visitKey);
+                    queue.push({ tile: neighbor, entryDirection: oppDir });
                 }
             }
         }
     }
 };
 
+// ============= SEVİYE ÇÖZÜLME KONTROLÜ =============
+
 /**
- * Seviye Çözülme Kontrolü
- * 
- * KOŞULLAR:
- * 1. Tüm lambalar yanmalı (powered)
- * 2. Tüm işlevsel parçalar (functional tiles) güç kaynağına bağlı olmalı
- *    Yani hiçbir "kopuk" parça kalmamalı - devre tek bir bütün olmalı
+ * Tüm fonksiyonel parçalar (empty hariç) powered olmalı
  */
 export const isLevelSolved = (tiles: Tile[]): boolean => {
-    // Koşul 1: Tüm lambalar yanıyor mu?
-    const bulbs = tiles.filter(t => t.type === 'bulb');
-    const allBulbsPowered = bulbs.length > 0 && bulbs.every(b => b.isPowered);
-
-    if (!allBulbsPowered) return false;
-
-    // Koşul 2: Tüm işlevsel parçalar güç kaynağına bağlı mı?
-    // Tüm tile'lar powered olmalı (kopuk parça olmamalı)
-    const allTilesPowered = tiles.every(t => t.isPowered);
-
-    return allTilesPowered;
-};
-
-/**
- * Yıldız Hesaplama
- * Bitirme süresine göre 1-3 yıldız verir
- * 
- * @param seconds - Bitirme süresi (saniye)
- * @param tileCount - Seviyedeki parça sayısı (zorluk faktörü)
- */
-export const calculateStars = (seconds: number, tileCount: number): number => {
-    // Zorluk faktörü: Daha fazla parça = daha fazla süre toleransı
-    // Base süre: Parça başına ~3 saniye
-    const baseTime = tileCount * 3;
-
-    // 3 Yıldız: Base sürenin altında
-    // 2 Yıldız: Base sürenin 2 katına kadar
-    // 1 Yıldız: Üstünde (tamamladıysan en az 1)
-
-    if (seconds <= baseTime) {
-        return 3;
-    } else if (seconds <= baseTime * 2) {
-        return 2;
-    } else {
-        return 1;
-    }
+    const functionalTiles = tiles.filter(t => t.type !== 'empty');
+    if (functionalTiles.length === 0) return false;
+    return functionalTiles.every(t => t.isPowered);
 };

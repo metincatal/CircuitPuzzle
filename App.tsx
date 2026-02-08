@@ -1,14 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, Pressable, SafeAreaView, Dimensions, Platform, Animated } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { Zap, Play, RotateCcw, X, Clock, Trophy, Star, Eye, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { StyleSheet, View, Pressable, SafeAreaView, Dimensions, Platform, Animated } from 'react-native';
+import { EyeOff, Eye, Camera } from 'lucide-react-native';
+import * as MediaLibrary from 'expo-media-library';
+import { captureRef } from 'react-native-view-shot';
 
-import { CircuitCanvas } from './src/components/CircuitCanvas';
-import { Starfield } from './src/components/Starfield';
-import { ConfettiRain } from './src/components/ConfettiRain';
-import { StarRating } from './src/components/StarRating';
+import { CircuitCanvas, COLORS } from './src/components/CircuitCanvas';
+import { MiniPreview } from './src/components/MiniPreview';
 import SoundManager from './src/utils/SoundManager';
 import HapticManager from './src/utils/HapticManager';
 import StorageManager from './src/utils/StorageManager';
@@ -17,142 +15,26 @@ import {
   generateGridLevel,
   calculatePowerFlow,
   isLevelSolved,
-  calculateStars,
 } from './src/types/circuit';
 
 const { width, height } = Dimensions.get('window');
 
-// --- GELİŞTİRİLMİŞ WIN MODAL ---
-interface WinModalProps {
-  timeStr: string;
-  stars: number;
-  isNewRecord: boolean;
-  bestTimeStr: string | null;
-  onNextLevel: () => void;
-  onRetry: () => void;
-  onClose: () => void;
-}
-
-const WinModal: React.FC<WinModalProps> = ({
-  timeStr,
-  stars,
-  isNewRecord,
-  bestTimeStr,
-  onNextLevel,
-  onRetry,
-  onClose,
-}) => {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const newRecordAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-
-    // Yeni rekor animasyonu
-    if (isNewRecord) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(newRecordAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-          Animated.timing(newRecordAnim, { toValue: 0.6, duration: 800, useNativeDriver: true }),
-        ])
-      ).start();
-    }
-  }, [isNewRecord]);
-
-  return (
-    <View style={styles.modalOverlay}>
-      <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
-
-      <Animated.View style={[styles.modalContent, { opacity: fadeAnim }]}>
-        {/* Kapat Butonu */}
-        <Pressable style={styles.closeButton} onPress={onClose}>
-          <X size={24} color="rgba(255,255,255,0.6)" />
-        </Pressable>
-
-        <View style={styles.successIconContainer}>
-          <Zap size={40} color="#2ecc71" fill="#2ecc71" />
-        </View>
-
-        <Text style={styles.modalTitle}>LEVEL COMPLETE</Text>
-
-        {/* Yıldız Gösterimi */}
-        <View style={styles.starsContainer}>
-          <StarRating stars={stars} size={48} animated={true} delay={300} />
-        </View>
-
-        {/* Süre ve Rekor */}
-        <View style={styles.timeContainer}>
-          <View style={styles.scoreRow}>
-            <Clock size={16} color="#fff" style={{ marginRight: 6 }} />
-            <Text style={styles.modalScore}>{timeStr}</Text>
-          </View>
-
-          {isNewRecord && (
-            <Animated.View style={[styles.newRecordBadge, { opacity: newRecordAnim }]}>
-              <Trophy size={14} color="#ffd700" style={{ marginRight: 4 }} />
-              <Text style={styles.newRecordText}>YENİ REKOR!</Text>
-            </Animated.View>
-          )}
-
-          {bestTimeStr && !isNewRecord && (
-            <View style={styles.bestTimeRow}>
-              <Trophy size={12} color="rgba(255,255,255,0.5)" style={{ marginRight: 4 }} />
-              <Text style={styles.bestTimeText}>En İyi: {bestTimeStr}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.modalLine} />
-
-        <Pressable
-          style={({ pressed }) => [styles.btnNext, pressed && styles.buttonPressed]}
-          onPress={onNextLevel}
-        >
-          <Text style={styles.btnNextText}>SONRAKİ BÖLÜM</Text>
-          <Play size={20} color="#fff" fill="#fff" style={{ marginLeft: 10 }} />
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [styles.btnRetry, pressed && styles.buttonPressed]}
-          onPress={onRetry}
-        >
-          <RotateCcw size={16} color="rgba(255,255,255,0.5)" />
-          <Text style={styles.btnRetryText}>TEKRAR OYNA</Text>
-        </Pressable>
-      </Animated.View>
-    </View>
-  );
-};
-
 export default function App() {
   const [level, setLevel] = useState<Level | null>(null);
-
-  // Seviye Geçmişi (Cache)
   const levelHistory = useRef<Record<number, { level: Level, initialTiles: any[] }>>({});
-
-  // Başlangıç Level'ını Sakla (Reset için)
   const [initialTiles, setInitialTiles] = useState<any[]>([]);
 
-  // Solution Reveal State
-  const [isSolutionVisible, setIsSolutionVisible] = useState(false);
+  // Mini preview (göz butonu)
+  const [showPreview, setShowPreview] = useState(false);
 
-  // Timer State
-  const [seconds, setSeconds] = useState(0);
-  const [isActiveTimer, setIsActiveTimer] = useState(false);
-
-  // Modal State
-  const [showWinModal, setShowWinModal] = useState(false);
-
-  // Confetti State
-  const [showConfetti, setShowConfetti] = useState(false);
-
-  // Yıldız ve Rekor State
-  const [earnedStars, setEarnedStars] = useState(0);
-  const [isNewRecord, setIsNewRecord] = useState(false);
-  const [bestTime, setBestTime] = useState<number | null>(null);
-
-  // Seviye numarası (basit sayaç) - 0'dan başlıyoruz ki ilk açılışta 1 olsun
+  // Level numarası
   const [levelNumber, setLevelNumber] = useState(0);
+
+  // Win renk animasyonu
+  const bgColorAnim = useRef(new Animated.Value(0)).current;
+
+  // Screenshot ref
+  const canvasRef = useRef<View>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -166,80 +48,38 @@ export default function App() {
     startNewLevel();
   }, []);
 
-  // Timer Logic
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isActiveTimer) {
-      interval = setInterval(() => {
-        setSeconds(s => s + 1);
-      }, 1000);
-    } else if (!isActiveTimer && seconds !== 0) {
-      if (interval) clearInterval(interval);
-    }
-    return () => { if (interval) clearInterval(interval); };
-  }, [isActiveTimer]);
-
-  // Format Timer (MM:SS)
-  const formatTime = (totalSeconds: number) => {
-    const minutes = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Level Win Logic
+  // Win renk geçişi
   useEffect(() => {
     if (level?.isSolved) {
-      setIsActiveTimer(false); // Süreyi Durdur
       SoundManager.playWin();
-
-      // Kutlama Haptic Feedback
       HapticManager.celebrationBurst();
 
-      // Konfeti yağmuru başlat
-      setShowConfetti(true);
+      Animated.timing(bgColorAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: false,
+      }).start();
 
-      // Yıldız hesapla
-      const stars = calculateStars(seconds, level.tiles.length);
-      setEarnedStars(stars);
-
-      // Rekoru kaydet ve kontrol et
-      const saveRecord = async () => {
-        const result = await StorageManager.saveLevelCompletion(
-          `level-${levelNumber}`,
-          seconds,
-          stars
-        );
-        setIsNewRecord(result.isNewRecord);
-        setBestTime(result.previousBest);
-      };
-      saveRecord();
-
-      // 2 Saniye Gecikmeli Modal
-      const timer = setTimeout(() => {
-        setShowWinModal(true);
-      }, 2000);
-
-      return () => clearTimeout(timer);
+      // Kaydet
+      StorageManager.saveLevelCompletion(
+        `level-${levelNumber}`,
+        0,
+        3
+      );
+    } else {
+      bgColorAnim.setValue(0);
     }
   }, [level?.isSolved]);
 
   const goToLevel = async (targetLevelNum: number) => {
-    // 1'den küçük level olamaz
     if (targetLevelNum < 1) return;
 
-    setShowWinModal(false);
-    setShowConfetti(false);
-    setIsNewRecord(false);
-    setEarnedStars(0);
-    setIsSolutionVisible(false); // Yeni levela geçerken çözümü gizle
+    setShowPreview(false);
+    bgColorAnim.setValue(0);
 
-    // Geçmişte var mı?
     if (levelHistory.current[targetLevelNum]) {
       const cached = levelHistory.current[targetLevelNum];
-      // Deep copy to prevent mutating history when playing
       const newTiles = JSON.parse(JSON.stringify(cached.initialTiles));
-
-      // Calculate power flow for the fresh start
       calculatePowerFlow(newTiles);
 
       setLevel({
@@ -249,10 +89,8 @@ export default function App() {
       });
       setInitialTiles(JSON.parse(JSON.stringify(cached.initialTiles)));
     } else {
-      // Yoksa yeni oluştur
-      const newLevel = generateGridLevel();
+      const newLevel = generateGridLevel(targetLevelNum);
 
-      // Cache'e kaydet (Initial state olarak)
       levelHistory.current[targetLevelNum] = {
         level: newLevel,
         initialTiles: JSON.parse(JSON.stringify(newLevel.tiles))
@@ -263,118 +101,57 @@ export default function App() {
     }
 
     setLevelNumber(targetLevelNum);
-
-    // Rekor bilgisini getir
-    const record = await StorageManager.getLevelRecord(`level-${targetLevelNum}`);
-    setBestTime(record?.bestTime ?? null);
-
-    // Timer Sıfırla ve Başlat
-    setSeconds(0);
-    setIsActiveTimer(true);
   };
 
   const startNewLevel = () => {
     goToLevel(levelNumber + 1);
   };
 
-  const handlePrevLevel = () => {
-    if (levelNumber > 1) {
-      goToLevel(levelNumber - 1);
+  // Win durumunda ekrana dokunma -> sonraki level
+  const handleScreenTap = () => {
+    if (level?.isSolved) {
+      startNewLevel();
     }
   };
 
-  const handleNextLevel = () => {
-    goToLevel(levelNumber + 1);
-  };
+  // Screenshot
+  const handleScreenshot = async () => {
+    if (!canvasRef.current) return;
 
-  // SIFIRLA (RESET) Fonksiyonu
-  const handleReset = () => {
-    if (!level || initialTiles.length === 0) return;
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') return;
 
-    setShowWinModal(false); // Modalı kapa
-    setShowConfetti(false); // Konfetiyi kapa
-    setIsSolutionVisible(false);
+      const uri = await captureRef(canvasRef.current, {
+        format: 'png',
+        quality: 1,
+      });
 
-    // Mevcut tile'ları initial state'e döndür
-    const resetTiles = JSON.parse(JSON.stringify(initialTiles));
-
-    // Güç akışını başlangıç haline göre tekrar hesapla
-    calculatePowerFlow(resetTiles);
-
-    setLevel({
-      ...level,
-      tiles: resetTiles,
-      isSolved: false
-    });
-
-    // Timer'ı Sıfırla
-    setSeconds(0);
-    setIsActiveTimer(true);
-  };
-
-  // Çözümü Göster/Gizle
-  const toggleSolution = () => {
-    if (!level) return;
-
-    if (isSolutionVisible) {
-      // Çözümden çık - Oyuncunun kaldığı yere dönmesi gerekir ama 
-      // basitlik için şimdilik "görsel" bir toggle yapalım.
-      // Ekranda görünen level'ı değiştirmeden sadece render edilen prop'u değiştirmek daha iyi olurdu
-      // ama CircuitCanvas state tutmuyor, direkt level prop'unu render ediyor.
-      // Bu yüzden level state'ini geçici olarak değiştireceğiz ya da ikinci bir state kullanacağız.
-      // Ancak "toggle" denildiği için, basınca görünüp çekince gitmesi mi, yoksa aç/kapa mı?
-      // "Göz butonuna tıklayınca görünür olsun" -> Toggle varsayalım.
-
-      // Kolay yöntem: State'i geri yükle (veya zaten level state'i ana source of truth)
-      // Biz "Görüntüleme Modu" yapacağız.
-      setIsSolutionVisible(false);
-    } else {
-      setIsSolutionVisible(true);
+      await MediaLibrary.saveToLibraryAsync(uri);
+      HapticManager.successNotification();
+    } catch (e) {
+      console.log('Screenshot error:', e);
     }
   };
-
-  // Render edilecek level (Çözüm modu aktifse çözülmüş hali)
-  const displayLevel = React.useMemo(() => {
-    if (!level) return null;
-
-    if (isSolutionVisible) {
-      // Çözülmüş kopyayı oluştur
-      const solvedTiles = level.tiles.map(t => ({
-        ...t,
-        rotation: t.solvedRotation, // Çözüm rotasyonuna getir
-        // isPowered hesaplanmalı (calculatePowerFlow ile)
-      }));
-
-      calculatePowerFlow(solvedTiles); // Hepsini powe eder muhtemelen
-
-      return {
-        ...level,
-        tiles: solvedTiles,
-        isSolved: true // Görsel olarak tamamlanmış görünsün
-      };
-    }
-
-    return level;
-  }, [level, isSolutionVisible]);
 
   const handleTilePress = useCallback((tileId: string) => {
-    if (!level || level.isSolved || isSolutionVisible) return; // Çözüm görünürken oynanmaz
+    if (!level || level.isSolved || showPreview) return;
 
-    // Dokunsal geri bildirim - Hafif tıklama
+    // Fixed parçalar döndürülemez
+    const tile = level.tiles.find(t => t.id === tileId);
+    if (tile?.fixed) return;
+
     HapticManager.lightTap();
     SoundManager.playClick();
 
     setLevel(prevLevel => {
       if (!prevLevel) return null;
 
-      const newTiles = prevLevel.tiles.map(tile => {
-        if (tile.id === tileId) {
-          return {
-            ...tile,
-            rotation: (tile.rotation + 1) % 4
-          };
+      const newTiles = prevLevel.tiles.map(t => {
+        if (t.id === tileId) {
+          return { ...t, rotation: (t.rotation + 1) % 4 };
         }
-        return tile;
+        return t;
       });
 
       calculatePowerFlow(newTiles);
@@ -385,143 +162,82 @@ export default function App() {
         isSolved: isLevelSolved(newTiles)
       };
     });
-  }, [level]);
+  }, [level, showPreview]);
 
-  if (!displayLevel || !level) return <View style={styles.loading}><Text style={{ color: '#fff' }}>Yükleniyor...</Text></View>;
+  if (!level) {
+    return (
+      <View style={styles.loading}>
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
+
+  const animatedBg = bgColorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [COLORS.background, COLORS.solvedBg],
+  });
 
   return (
-    <LinearGradient
-      colors={['#0b1021', '#1a2a3a', '#2c5364']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.container}
-    >
-      <StatusBar style="light" />
-      <Starfield />
+    <Animated.View style={[styles.container, { backgroundColor: animatedBg }]}>
+      <StatusBar style="dark" />
 
       <SafeAreaView style={styles.safeArea}>
-
-        {/* HEADER */}
+        {/* HEADER - Göz butonu sağ üstte */}
         <View style={styles.header}>
-          {/* Seviye Numarası ve Navigasyon */}
-          <View style={styles.levelNavContainer}>
-            <Pressable onPress={handlePrevLevel} style={({ pressed }) => [styles.navBtn, pressed && styles.opacity50, levelNumber <= 1 && styles.opacity20]} disabled={levelNumber <= 1}>
-              <ChevronLeft size={24} color="#fff" />
+          <View style={{ width: 40 }} />
+
+          {/* Boş merkez */}
+          <View style={{ flex: 1 }} />
+
+          {/* Göz butonu - sadece çözülmemişken */}
+          {!level.isSolved ? (
+            <Pressable
+              style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed, showPreview && styles.activeButton]}
+              onPress={() => setShowPreview(!showPreview)}
+            >
+              {showPreview ? (
+                <EyeOff size={20} color="#6B7B3A" />
+              ) : (
+                <Eye size={20} color="rgba(107,123,58,0.5)" />
+              )}
             </Pressable>
-
-            <View style={styles.levelBadge}>
-              <Text style={styles.levelText}>LEVEL {levelNumber}</Text>
-            </View>
-
-            <Pressable onPress={handleNextLevel} style={({ pressed }) => [styles.navBtn, pressed && styles.opacity50]}>
-              <ChevronRight size={24} color="#fff" />
+          ) : (
+            <Pressable
+              style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}
+              onPress={handleScreenshot}
+            >
+              <Camera size={20} color="#4A8B5C" />
             </Pressable>
-          </View>
-
-          {/* Timer Rozeti */}
-          <View style={[styles.timerBadge, displayLevel.isSolved && styles.timerBadgeSuccess]}>
-            <Clock size={14} color={displayLevel.isSolved ? "#2ecc71" : "rgba(255,255,255,0.6)"} />
-            <Text style={[styles.timerText, displayLevel.isSolved && { color: '#2ecc71' }]}>
-              {formatTime(seconds)}
-            </Text>
-          </View>
-
-          {/* Rekor Göstergesi (varsa) */}
-          {bestTime !== null && (
-            <View style={styles.bestTimeBadge}>
-              <Trophy size={12} color="#ffd700" />
-              <Text style={styles.bestTimeBadgeText}>{formatTime(bestTime)}</Text>
-            </View>
           )}
         </View>
 
         {/* GAME CANVAS */}
-        <View style={[
-          styles.canvasContainer,
-          { shadowOpacity: level.isSolved ? 0.6 : 0.1 }
-        ]}>
-          <CircuitCanvas
-            level={displayLevel}
-            onTilePress={handleTilePress}
-          />
-        </View>
+        <Pressable
+          style={styles.canvasContainer}
+          onPress={handleScreenTap}
+          disabled={!level.isSolved}
+        >
+          <View ref={canvasRef} collapsable={false}>
+            <CircuitCanvas
+              level={level}
+              onTilePress={handleTilePress}
+              isSolved={level.isSolved}
+            />
+          </View>
+        </Pressable>
 
-        {/* FOOTER & CONTROLS */}
-        <View style={styles.footer}>
-          {/* Oyun Devam Ediyorsa veya Çözüm Modu Açıksa */}
-          {!level.isSolved && (
-            <>
-              <Text style={styles.instruction}>
-                {isSolutionVisible ? 'Çözüm Modu Aktif' : 'Akışı sağlamak için parçaları döndür.'}
-              </Text>
-
-              <View style={styles.controlsRow}>
-                {/* ÇÖZÜM BUTONU */}
-                <Pressable
-                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed, isSolutionVisible && styles.activeButton]}
-                  onPress={toggleSolution}
-                >
-                  <Eye size={24} color={isSolutionVisible ? "#00fff2" : "rgba(255,255,255,0.6)"} />
-                </Pressable>
-
-                {/* SIFIRLA BUTONU */}
-                <Pressable
-                  style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-                  onPress={handleReset}
-                >
-                  <RotateCcw size={16} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.buttonText}>SIFIRLA</Text>
-                </Pressable>
-
-                {/* Dengelemek için boş view */}
-                <View style={{ width: 50 }} />
-              </View>
-            </>
-          )}
-
-          {/* Oyun Bitti ve Modal Kapalıysa -> Alt Buton Grubu */}
-          {level.isSolved && !showWinModal && (
-            <View style={styles.winControls}>
-              <Pressable
-                style={({ pressed }) => [styles.btnRetrySmall, pressed && styles.buttonPressed]}
-                onPress={handleReset}
-              >
-                <RotateCcw size={20} color="rgba(255,255,255,0.7)" />
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [styles.btnNextWide, pressed && styles.buttonPressed]}
-                onPress={startNewLevel}
-              >
-                <Text style={styles.btnNextWideText}>SONRAKİ BÖLÜM</Text>
-                <Play size={20} color="#fff" fill="#fff" style={{ marginLeft: 8 }} />
-              </Pressable>
-            </View>
-          )}
-        </View>
-
+        {/* FOOTER - boş alan */}
+        <View style={styles.footer} />
       </SafeAreaView>
 
-      {/* WIN MODAL OVERLAY */}
-      {showWinModal && (
-        <WinModal
-          timeStr={formatTime(seconds)}
-          stars={earnedStars}
-          isNewRecord={isNewRecord}
-          bestTimeStr={bestTime !== null ? formatTime(bestTime) : null}
-          onNextLevel={startNewLevel}
-          onRetry={handleReset}
-          onClose={() => setShowWinModal(false)}
+      {/* MINI PREVIEW OVERLAY */}
+      {showPreview && !level.isSolved && (
+        <MiniPreview
+          level={level}
+          onClose={() => setShowPreview(false)}
         />
       )}
-
-      {/* CONFETTI RAIN - Bölüm Sonu Kutlaması */}
-      <ConfettiRain
-        visible={showConfetti}
-        onComplete={() => setShowConfetti(false)}
-      />
-
-    </LinearGradient>
+    </Animated.View>
   );
 }
 
@@ -531,9 +247,9 @@ const styles = StyleSheet.create({
   },
   loading: {
     flex: 1,
-    backgroundColor: '#0f2027',
+    backgroundColor: COLORS.background,
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
   },
   safeArea: {
     flex: 1,
@@ -542,299 +258,32 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'android' ? 40 : 20,
   },
   header: {
-    alignItems: 'center',
-    marginTop: 40,
-    width: '100%',
-    gap: 10,
-  },
-  levelNavContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-  },
-  navBtn: {
-    padding: 8,
-  },
-  opacity50: {
-    opacity: 0.5
-  },
-  opacity20: {
-    opacity: 0.2
-  },
-  levelBadge: {
+    justifyContent: 'space-between',
+    width: '100%',
     paddingHorizontal: 20,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  levelText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 2,
-  },
-  timerBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  timerBadgeSuccess: {
-    borderColor: '#2ecc71',
-    backgroundColor: 'rgba(46, 204, 113, 0.1)',
-  },
-  timerText: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 1,
-  },
-  bestTimeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(255, 215, 0, 0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.3)',
-  },
-  bestTimeBadgeText: {
-    color: '#ffd700',
-    fontSize: 11,
-    fontWeight: '500',
-    marginLeft: 4,
-    fontVariant: ['tabular-nums'],
-  },
-  canvasContainer: {
-    shadowColor: '#00fff2',
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 50,
-  },
-  footer: {
-    alignItems: 'center',
-    marginBottom: 40,
-    width: '100%',
-    minHeight: 120,
-    justifyContent: 'flex-end',
-  },
-  instruction: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 13,
-    marginBottom: 20,
-    letterSpacing: 0.5,
-  },
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 30,
-    paddingVertical: 14,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  buttonText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 1.5,
-  },
-  buttonPressed: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    opacity: 0.8,
-  },
-  controlsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between', // Veya space-around
-    width: '100%',
-    paddingHorizontal: 30,
-    gap: 20
+    marginTop: 10,
   },
   iconButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(107,123,58,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
   },
   activeButton: {
-    backgroundColor: 'rgba(0, 255, 242, 0.15)', // Glow rengi
-    borderColor: '#00fff2',
+    backgroundColor: 'rgba(107,123,58,0.15)',
   },
-
-  // --- WIN CONTROLS (Footer) ---
-  winControls: {
-    flexDirection: 'row',
+  buttonPressed: {
+    opacity: 0.6,
+  },
+  canvasContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 15,
   },
-  btnRetrySmall: {
-    width: 50, height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  btnNextWide: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2ecc71',
-    paddingHorizontal: 30,
-    paddingVertical: 14,
-    borderRadius: 25,
-    shadowColor: '#2ecc71',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 15,
-  },
-  btnNextWideText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-    letterSpacing: 1,
-  },
-
-  // --- MODAL STYLES ---
-  modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 100,
-  },
-  modalContent: {
-    width: width * 0.85,
-    backgroundColor: 'rgba(15, 23, 35, 0.95)',
-    borderRadius: 30,
-    padding: 30,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    shadowColor: '#00fff2',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 40,
-    position: 'relative',
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 15,
-    right: 15,
-    padding: 5,
-  },
-  successIconContainer: {
-    width: 70, height: 70,
-    borderRadius: 35,
-    backgroundColor: 'rgba(46, 204, 113, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(46, 204, 113, 0.3)',
-  },
-  modalTitle: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    marginBottom: 15,
-  },
-  starsContainer: {
-    marginBottom: 15,
-  },
-  timeContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  scoreRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 15,
-    marginBottom: 8,
-  },
-  modalScore: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    fontVariant: ['tabular-nums'],
-  },
-  newRecordBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 215, 0, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ffd700',
-  },
-  newRecordText: {
-    color: '#ffd700',
-    fontSize: 12,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  bestTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  bestTimeText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 12,
-  },
-  modalLine: {
-    width: '100%',
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginBottom: 25,
-  },
-  btnNext: {
-    backgroundColor: '#2ecc71',
-    paddingHorizontal: 40,
-    paddingVertical: 16,
-    borderRadius: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-    shadowColor: '#2ecc71',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 15,
-    width: '100%',
-    justifyContent: 'center',
-  },
-  btnNextText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  btnRetry: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-  },
-  btnRetryText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 14,
-    marginLeft: 5,
+  footer: {
+    height: 60,
   },
 });
