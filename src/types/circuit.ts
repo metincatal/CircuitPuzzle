@@ -146,13 +146,13 @@ interface DifficultyConfig {
 
 const getDifficultyConfig = (levelNumber: number): DifficultyConfig => {
     if (levelNumber <= 5) {
-        return { rows: 6, cols: 5, structureCount: 1, bridgeChance: 0, fixedChance: 0 };
+        return { rows: 6, cols: 5, structureCount: 1, bridgeChance: 0.05, fixedChance: 0 };
     } else if (levelNumber <= 15) {
-        return { rows: 7, cols: 6, structureCount: 1, bridgeChance: 0.15, fixedChance: 0 };
+        return { rows: 7, cols: 6, structureCount: 1, bridgeChance: 0.12, fixedChance: 0 };
     } else if (levelNumber <= 30) {
-        return { rows: 8, cols: 7, structureCount: 2, bridgeChance: 0.20, fixedChance: 0 };
+        return { rows: 8, cols: 7, structureCount: 2, bridgeChance: 0.18, fixedChance: 0 };
     } else {
-        return { rows: 9, cols: 8, structureCount: 2 + (levelNumber > 50 ? 1 : 0), bridgeChance: 0.25, fixedChance: 0.10 };
+        return { rows: 9, cols: 8, structureCount: 2 + (levelNumber > 50 ? 1 : 0), bridgeChance: 0.25, fixedChance: 0 };
     }
 };
 
