@@ -16,9 +16,9 @@ interface MiniPreviewProps {
     level: Level;
 }
 
-const PREVIEW_SCALE = 0.30;
-const STROKE_WIDTH = 2.5;
-const NODE_RADIUS = 2;
+const PREVIEW_SCALE = 0.22;
+const STROKE_WIDTH = 2;
+const NODE_RADIUS = 1.5;
 
 export const MiniPreview: React.FC<MiniPreviewProps> = ({ level }) => {
     const solvedLevel = useMemo(() => {
@@ -141,10 +141,9 @@ export const MiniPreview: React.FC<MiniPreviewProps> = ({ level }) => {
 const styles = StyleSheet.create({
     container: {
         backgroundColor: 'rgba(107,123,58,0.06)',
-        borderRadius: 12,
-        padding: 8,
+        borderRadius: 10,
+        padding: 6,
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: 16,
     },
 });

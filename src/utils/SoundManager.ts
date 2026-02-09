@@ -24,11 +24,11 @@ class SoundManager {
         });
 
         try {
-            const { sound: click } = await Audio.Sound.createAsync(require('../../assets/sounds/click.wav'));
+            const { sound: click } = await Audio.Sound.createAsync(require('../../assets/sounds/click2.mp3'));
             this.clickSound = click;
             await this.clickSound.setVolumeAsync(0.3);
 
-            const { sound: win } = await Audio.Sound.createAsync(require('../../assets/sounds/win.mp3'));
+            const { sound: win } = await Audio.Sound.createAsync(require('../../assets/sounds/win2.mp3'));
             this.winSound = win;
 
             this.playNextBGM();

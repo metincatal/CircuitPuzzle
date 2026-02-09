@@ -2,11 +2,11 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import {
   StyleSheet, View, Pressable, SafeAreaView, Text,
-  Dimensions, Platform, Animated, Easing,
+  Dimensions, Platform, Animated, Easing, GestureResponderEvent,
 } from 'react-native';
 import { EyeOff, Eye, Camera, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import * as MediaLibrary from 'expo-media-library';
-import { captureRef } from 'react-native-view-shot';
+import ViewShot from 'react-native-view-shot';
 
 import { CircuitCanvas, COLORS } from './src/components/CircuitCanvas';
 import { MiniPreview } from './src/components/MiniPreview';
@@ -33,12 +33,14 @@ export default function App() {
   // Win renk animasyonu
   const bgColorAnim = useRef(new Animated.Value(0)).current;
 
-  // Geçiş animasyonu (fade)
-  const transitionAnim = useRef(new Animated.Value(0)).current;
+  // Circle reveal geçiş animasyonu
+  const circleScale = useRef(new Animated.Value(0)).current;
+  const circleOpacity = useRef(new Animated.Value(1)).current;
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [tapPos, setTapPos] = useState({ x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 });
 
   // Screenshot ref
-  const canvasRef = useRef<View>(null);
+  const viewShotRef = useRef<any>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -106,37 +108,52 @@ export default function App() {
     goToLevel(levelNumber + 1);
   };
 
-  // Win durumunda ekrana tıklama -> fade geçiş
-  const handleWinTap = () => {
+  // Win durumunda ekrana tıklama -> circle reveal geçiş
+  const handleWinTap = (event: GestureResponderEvent) => {
     if (!level?.isSolved || isTransitioning) return;
-    setIsTransitioning(true);
-    transitionAnim.setValue(0);
 
-    // Fade in (perde kapanır)
-    Animated.timing(transitionAnim, {
-      toValue: 1,
-      duration: 350,
-      easing: Easing.inOut(Easing.ease),
+    const { pageX, pageY } = event.nativeEvent;
+    setTapPos({ x: pageX, y: pageY });
+    setIsTransitioning(true);
+
+    circleScale.setValue(0);
+    circleOpacity.setValue(1);
+
+    // Ekranın en uzak köşesine olan mesafe
+    const maxDist = Math.sqrt(
+      Math.pow(Math.max(pageX, SCREEN_WIDTH - pageX), 2) +
+      Math.pow(Math.max(pageY, SCREEN_HEIGHT - pageY), 2)
+    );
+    const CIRCLE_RADIUS = 10;
+    const targetScale = Math.ceil(maxDist / CIRCLE_RADIUS) + 2;
+
+    // Circle büyüme (perde kapanır) - yavaş ve belirgin
+    Animated.timing(circleScale, {
+      toValue: targetScale,
+      duration: 700,
+      easing: Easing.inOut(Easing.cubic),
       useNativeDriver: true,
     }).start(() => {
       // Perde tam kapandı - yeni level yükle
       startNewLevel();
 
-      // Kısa bekleme sonra fade out
+      // Bekleme sonra fade out ile yeni level'ı göster
       setTimeout(() => {
-        Animated.timing(transitionAnim, {
+        Animated.timing(circleOpacity, {
           toValue: 0,
-          duration: 350,
+          duration: 600,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }).start(() => {
           setIsTransitioning(false);
+          circleScale.setValue(0);
+          circleOpacity.setValue(1);
         });
-      }, 100);
+      }, 250);
     });
   };
 
-  // Screenshot
+  // Screenshot - ViewShot ile yakala, galeriye kaydet
   const handleScreenshot = async () => {
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
@@ -145,11 +162,8 @@ export default function App() {
         return;
       }
 
-      if (canvasRef.current) {
-        const uri = await captureRef(canvasRef, {
-          format: 'png',
-          quality: 1,
-        });
+      if (viewShotRef.current) {
+        const uri = await viewShotRef.current.capture();
         await MediaLibrary.saveToLibraryAsync(uri);
         HapticManager.successNotification();
       }
@@ -220,7 +234,7 @@ export default function App() {
 
           <View style={{ flex: 1 }} />
 
-          {/* Göz butonu */}
+          {/* Goz butonu */}
           {!level.isSolved && (
             <Pressable
               style={({ pressed }) => [styles.iconButton, pressed && styles.btnPressed, showPreview && styles.activeButton]}
@@ -235,31 +249,31 @@ export default function App() {
           )}
         </View>
 
-        {/* GAME CANVAS */}
-        <View style={styles.canvasContainer}>
-          <View
-            ref={canvasRef}
-            collapsable={false}
-            style={{ backgroundColor: level.isSolved ? COLORS.solvedBg : COLORS.background }}
-          >
-            <CircuitCanvas
-              level={level}
-              onTilePress={handleTilePress}
-              isSolved={level.isSolved}
-            />
-          </View>
+        {/* MERKEZ ALAN - puzzle'i dikey eksende ortalar */}
+        <View style={styles.centerArea}>
+          <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 1 }}>
+            <View
+              collapsable={false}
+              style={{ backgroundColor: level.isSolved ? COLORS.solvedBg : COLORS.background }}
+            >
+              <CircuitCanvas
+                level={level}
+                onTilePress={handleTilePress}
+                isSolved={level.isSolved}
+              />
+            </View>
+          </ViewShot>
         </View>
-
-        {/* MİNİ ÖNİZLEME - Puzzle altında */}
-        {showPreview && !level.isSolved && (
-          <MiniPreview level={level} />
-        )}
-
-        {/* FOOTER SPACER */}
-        <View style={styles.footer} />
       </SafeAreaView>
 
-      {/* WIN TAP OVERLAY - çözülünce ekrana dokunarak sonraki seviyeye geç */}
+      {/* MINI ONIZLEME - ekranin alt kisminda, absolute konumda (puzzle yerlesimini etkilemez) */}
+      {showPreview && !level.isSolved && (
+        <View style={styles.previewContainer}>
+          <MiniPreview level={level} />
+        </View>
+      )}
+
+      {/* WIN TAP OVERLAY - cozulunce ekrana dokunarak sonraki seviyeye gec */}
       {level.isSolved && !isTransitioning && (
         <Pressable
           style={styles.winTapOverlay}
@@ -267,7 +281,7 @@ export default function App() {
         />
       )}
 
-      {/* SCREENSHOT BUTONU - overlay'in üstünde */}
+      {/* SCREENSHOT BUTONU - overlay'in ustunde */}
       {level.isSolved && !isTransitioning && (
         <View style={styles.screenshotContainer}>
           <Pressable
@@ -279,14 +293,22 @@ export default function App() {
         </View>
       )}
 
-      {/* FADE GEÇİŞ EFEKTİ */}
+      {/* CIRCLE REVEAL GECIS EFEKTI - dokunulan noktadan buyuyerek ekrani kapatir */}
       {isTransitioning && (
         <Animated.View
           pointerEvents="none"
-          style={[
-            styles.transitionOverlay,
-            { opacity: transitionAnim },
-          ]}
+          style={{
+            position: 'absolute',
+            left: tapPos.x - 10,
+            top: tapPos.y - 10,
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            backgroundColor: '#5A6B32',
+            transform: [{ scale: circleScale }],
+            opacity: circleOpacity,
+            zIndex: 100,
+          }}
         />
       )}
     </Animated.View>
@@ -306,8 +328,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingVertical: Platform.OS === 'android' ? 40 : 20,
   },
   header: {
     flexDirection: 'row',
@@ -315,8 +335,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     paddingHorizontal: 20,
-    marginTop: 10,
-    marginBottom: 20,
+    paddingTop: Platform.OS === 'android' ? 40 : 10,
+    paddingBottom: 10,
   },
   levelNav: {
     flexDirection: 'row',
@@ -348,20 +368,21 @@ const styles = StyleSheet.create({
   btnPressed: {
     opacity: 0.5,
   },
-  canvasContainer: {
-    alignItems: 'center',
+  centerArea: {
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     overflow: 'visible',
   },
-  footer: {
-    height: 70,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 'auto',
+  previewContainer: {
+    position: 'absolute',
+    bottom: Platform.OS === 'android' ? 30 : 50,
+    alignSelf: 'center',
+    zIndex: 10,
   },
   screenshotContainer: {
     position: 'absolute',
-    bottom: Platform.OS === 'android' ? 50 : 60,
+    bottom: Platform.OS === 'android' ? 40 : 60,
     alignSelf: 'center',
     zIndex: 60,
   },
@@ -377,10 +398,5 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 50,
     backgroundColor: 'transparent',
-  },
-  transitionOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: COLORS.background,
-    zIndex: 100,
   },
 });
