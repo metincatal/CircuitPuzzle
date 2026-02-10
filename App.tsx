@@ -184,8 +184,10 @@ export default function App() {
     setLevel(prevLevel => {
       if (!prevLevel) return null;
       const newTiles = prevLevel.tiles.map(t => {
-        if (t.id === tileId) return { ...t, rotation: (t.rotation + 1) % 4 };
-        return t;
+        if (t.id !== tileId) return t;
+        if (t.type === 'blocker') return t; // Blocker tıklanamaz
+        if (t.type === 'switch') return { ...t, switchState: !t.switchState }; // Toggle
+        return { ...t, rotation: (t.rotation + 1) % 4 };
       });
       calculatePowerFlow(newTiles);
       return { ...prevLevel, tiles: newTiles, isSolved: isLevelSolved(newTiles) };
