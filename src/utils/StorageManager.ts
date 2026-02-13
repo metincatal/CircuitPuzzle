@@ -25,9 +25,18 @@ export interface GameStats {
     bestOverallTime: number; // en hızlı tamamlama
 }
 
+export interface DuelStats {
+    totalGames: number;
+    p1Wins: number;
+    p2Wins: number;
+}
+
 const STORAGE_KEYS = {
     LEVEL_RECORDS: '@circuit_level_records',
     GAME_STATS: '@circuit_game_stats',
+    SPEED_HIGH_SCORE: '@circuit_speed_high_score',
+    LAST_CLASSIC_LEVEL: '@circuit_last_classic_level',
+    DUEL_STATS: '@circuit_duel_stats',
 };
 
 class StorageManager {
@@ -180,6 +189,97 @@ class StorageManager {
             );
         } catch (error) {
             console.error('Error persisting game stats:', error);
+        }
+    }
+
+    // ============= SPEED MODE =============
+
+    /**
+     * Speed mode en iyi skoru kaydet
+     * @returns Yeni rekor kırıldıysa true
+     */
+    static async saveSpeedHighScore(score: number): Promise<boolean> {
+        await this.initialize();
+        try {
+            const current = await this.getSpeedHighScore();
+            if (score > current) {
+                await AsyncStorage.setItem(STORAGE_KEYS.SPEED_HIGH_SCORE, score.toString());
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Error saving speed high score:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Speed mode en iyi skoru getir
+     */
+    static async getSpeedHighScore(): Promise<number> {
+        try {
+            const val = await AsyncStorage.getItem(STORAGE_KEYS.SPEED_HIGH_SCORE);
+            return val ? parseInt(val, 10) : 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+
+    // ============= CLASSIC MODE LAST LEVEL =============
+
+    /**
+     * Klasik modda son oynanan seviyeyi kaydet
+     */
+    static async saveLastClassicLevel(level: number): Promise<void> {
+        try {
+            await AsyncStorage.setItem(STORAGE_KEYS.LAST_CLASSIC_LEVEL, level.toString());
+        } catch (error) {
+            console.error('Error saving last classic level:', error);
+        }
+    }
+
+    /**
+     * Klasik modda son oynanan seviyeyi getir
+     */
+    static async getLastClassicLevel(): Promise<number> {
+        try {
+            const val = await AsyncStorage.getItem(STORAGE_KEYS.LAST_CLASSIC_LEVEL);
+            return val ? parseInt(val, 10) : 1;
+        } catch (error) {
+            return 1;
+        }
+    }
+
+    // ============= DUEL MODE =============
+
+    /**
+     * Duel sonucunu kaydet
+     */
+    static async saveDuelResult(winner: 1 | 2): Promise<void> {
+        try {
+            const stats = await this.getDuelStats();
+            stats.totalGames += 1;
+            if (winner === 1) {
+                stats.p1Wins += 1;
+            } else {
+                stats.p2Wins += 1;
+            }
+            await AsyncStorage.setItem(STORAGE_KEYS.DUEL_STATS, JSON.stringify(stats));
+        } catch (error) {
+            console.error('Error saving duel result:', error);
+        }
+    }
+
+    /**
+     * Duel istatistiklerini getir
+     */
+    static async getDuelStats(): Promise<DuelStats> {
+        try {
+            const val = await AsyncStorage.getItem(STORAGE_KEYS.DUEL_STATS);
+            if (val) return JSON.parse(val);
+            return { totalGames: 0, p1Wins: 0, p2Wins: 0 };
+        } catch (error) {
+            return { totalGames: 0, p1Wins: 0, p2Wins: 0 };
         }
     }
 }

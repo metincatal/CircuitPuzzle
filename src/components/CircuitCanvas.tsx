@@ -28,6 +28,10 @@ interface CircuitCanvasProps {
     level: Level;
     onTilePress: (tileId: string) => void;
     isSolved?: boolean;
+    maxHeight?: number;
+    containerWidth?: number;
+    strokeScale?: number;
+    blackout?: boolean;
 }
 
 // Tile'ın base (rotation=0) halindeki SVG path'lerini hesapla (lokal koordinat: 0,0 -> cellSize,cellSize)
@@ -265,7 +269,13 @@ const AnimatedTile: React.FC<{
     cellSize: number;
     strokeColor: string;
     onPress: () => void;
-}> = React.memo(({ tile, cellSize, strokeColor, onPress }) => {
+    strokeScale: number;
+    blackout?: boolean;
+}> = React.memo(({ tile, cellSize, strokeColor, onPress, strokeScale, blackout }) => {
+    const sw = STROKE_WIDTH * strokeScale;
+    const nr = NODE_RADIUS * strokeScale;
+    const svgOverflow = sw;
+
     const animRotation = useRef(new Animated.Value(tile.rotation * 90)).current;
     const prevRotation = useRef(tile.rotation);
 
@@ -344,39 +354,40 @@ const AnimatedTile: React.FC<{
                 }}
             >
                 <Svg
-                    width={cellSize + SVG_OVERFLOW * 2}
-                    height={cellSize + SVG_OVERFLOW * 2}
-                    viewBox={`${-SVG_OVERFLOW} ${-SVG_OVERFLOW} ${cellSize + SVG_OVERFLOW * 2} ${cellSize + SVG_OVERFLOW * 2}`}
-                    style={{ marginLeft: -SVG_OVERFLOW, marginTop: -SVG_OVERFLOW }}
+                    width={cellSize + svgOverflow * 2}
+                    height={cellSize + svgOverflow * 2}
+                    viewBox={`${-svgOverflow} ${-svgOverflow} ${cellSize + svgOverflow * 2} ${cellSize + svgOverflow * 2}`}
+                    style={{ marginLeft: -svgOverflow, marginTop: -svgOverflow }}
                 >
-                    {base.paths.map((d, i) => (
+                    {/* Blackout: kablolar gizlenir, sadece source/bulb node'ları görünür */}
+                    {!blackout && base.paths.map((d, i) => (
                         <Path
                             key={`p-${i}`}
                             d={d}
                             stroke={strokeColor}
-                            strokeWidth={STROKE_WIDTH}
+                            strokeWidth={sw}
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             fill={base.isBlocker ? strokeColor : 'none'}
                         />
                     ))}
-                    {base.bridgeOverPath && (
+                    {!blackout && base.bridgeOverPath && (
                         <Path
                             d={base.bridgeOverPath}
                             stroke={strokeColor}
-                            strokeWidth={STROKE_WIDTH}
+                            strokeWidth={sw}
                             strokeLinecap="round"
                             fill="none"
                         />
                     )}
-                    {base.diodeArrowPath && (
+                    {!blackout && base.diodeArrowPath && (
                         <Path
                             d={base.diodeArrowPath}
                             fill={strokeColor}
                             stroke="none"
                         />
                     )}
-                    {base.switchIndicatorPath && (
+                    {!blackout && base.switchIndicatorPath && (
                         <Path
                             d={base.switchIndicatorPath}
                             fill={strokeColor}
@@ -387,8 +398,8 @@ const AnimatedTile: React.FC<{
                         <Circle
                             cx={cellSize / 2}
                             cy={cellSize / 2}
-                            r={NODE_RADIUS + 2}
-                            fill={strokeColor}
+                            r={nr + 2 * strokeScale}
+                            fill={blackout ? COLORS.passive : strokeColor}
                         />
                     )}
                 </Svg>
@@ -401,9 +412,16 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
     level,
     onTilePress,
     isSolved = false,
+    maxHeight,
+    containerWidth,
+    strokeScale = 1,
+    blackout = false,
 }) => {
-    const canvasWidth = SCREEN_WIDTH - 20;
-    const cellSize = canvasWidth / level.cols;
+    const canvasWidth = containerWidth ?? (SCREEN_WIDTH - 20);
+    const cellW = canvasWidth / level.cols;
+    const cellH = maxHeight ? maxHeight / level.rows : cellW;
+    const cellSize = Math.min(cellW, cellH);
+    const actualWidth = cellSize * level.cols;
     const canvasHeight = cellSize * level.rows;
 
     const cableColor = isSolved ? COLORS.solvedActive : COLORS.active;
@@ -411,7 +429,7 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
 
     return (
         <View style={{
-            width: canvasWidth,
+            width: actualWidth,
             height: canvasHeight,
             overflow: 'visible',
         }}>
@@ -426,6 +444,8 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
                         cellSize={cellSize}
                         strokeColor={strokeColor}
                         onPress={() => onTilePress(tile.id)}
+                        strokeScale={strokeScale}
+                        blackout={blackout}
                     />
                 );
             })}
