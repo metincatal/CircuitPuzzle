@@ -41,11 +41,14 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
     const cx = half;
     const cy = half;
 
+    // Extend paths beyond cell boundary to ensure seamless connections between adjacent tiles.
+    // On web, SVG overflow can be clipped, causing gaps and sharp edges at tile borders.
+    const extend = cellSize * 0.08;
     const edgePoints: Record<string, { x: number; y: number }> = {
-        top: { x: cx, y: 0 },
-        right: { x: cellSize, y: cy },
-        bottom: { x: cx, y: cellSize },
-        left: { x: 0, y: cy },
+        top: { x: cx, y: -extend },
+        right: { x: cellSize + extend, y: cy },
+        bottom: { x: cx, y: cellSize + extend },
+        left: { x: -extend, y: cy },
     };
 
     const conns = Object.entries(baseConns).filter(([_, v]) => v).map(([k]) => k);
@@ -274,7 +277,7 @@ const AnimatedTile: React.FC<{
 }> = React.memo(({ tile, cellSize, strokeColor, onPress, strokeScale, blackout }) => {
     const sw = STROKE_WIDTH * strokeScale;
     const nr = NODE_RADIUS * strokeScale;
-    const svgOverflow = sw;
+    const svgOverflow = sw + cellSize * 0.08;
 
     const animRotation = useRef(new Animated.Value(tile.rotation * 90)).current;
     const prevRotation = useRef(tile.rotation);
