@@ -46,11 +46,12 @@ export const MiniPreview: React.FC<MiniPreviewProps> = ({ level }) => {
                     const cy = tile.position.row * cellSize + cellSize / 2;
                     const half = cellSize / 2;
 
+                    const extend = cellSize * 0.08;
                     const edgePoints: Record<string, { x: number; y: number }> = {
-                        top: { x: cx, y: cy - half },
-                        right: { x: cx + half, y: cy },
-                        bottom: { x: cx, y: cy + half },
-                        left: { x: cx - half, y: cy },
+                        top: { x: cx, y: cy - half - extend },
+                        right: { x: cx + half + extend, y: cy },
+                        bottom: { x: cx, y: cy + half + extend },
+                        left: { x: cx - half - extend, y: cy },
                     };
 
                     const conns = Object.entries(activeConns).filter(([_, v]) => v).map(([k]) => k);
