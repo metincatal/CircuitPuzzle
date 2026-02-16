@@ -22,7 +22,11 @@ jobs:
 
       - run: npm install react-dom@19.1.0 react-native-web react-native-worklets --legacy-peer-deps
 
-      - run: EXPO_NO_DOCTOR=1 npx expo export --platform web
+      - name: Export web build
+        run: npx expo export --platform web
+        env:
+          EXPO_NO_DOCTOR: 1
+          NODE_ENV: production
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
