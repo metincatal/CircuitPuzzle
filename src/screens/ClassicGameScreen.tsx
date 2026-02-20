@@ -286,14 +286,14 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
             </View>
           )}
         </View>
-      </SafeAreaView>
 
-      {/* MINI ÖNIZLEME */}
-      {showPreview && !level.isSolved && (
-        <View style={styles.previewContainer}>
-          <MiniPreview level={level} />
-        </View>
-      )}
+        {/* MINI ÖNIZLEME - centerArea'nın altında, çakışmadan */}
+        {showPreview && !level.isSolved && (
+          <View style={styles.previewContainer}>
+            <MiniPreview level={level} />
+          </View>
+        )}
+      </SafeAreaView>
 
       {/* WIN TAP OVERLAY */}
       {level.isSolved && !isTransitioning && (
@@ -405,10 +405,8 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   previewContainer: {
-    position: 'absolute',
-    bottom: Platform.OS === 'android' ? 30 : 50,
     alignSelf: 'center',
-    zIndex: 10,
+    marginBottom: Platform.OS === 'android' ? 10 : 16,
   },
   screenshotContainer: {
     position: 'absolute',

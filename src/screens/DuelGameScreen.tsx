@@ -22,9 +22,11 @@ import {
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DUEL_COLOR = '#7B5EA7';
 const P2_COLOR = '#C17A3A';
-const STATUS_BAR_HEIGHT = Platform.OS === 'android'
-  ? (RNStatusBar.currentHeight || 40)
-  : 54;
+const STATUS_BAR_HEIGHT = Platform.OS === 'web'
+  ? 0
+  : Platform.OS === 'android'
+    ? (RNStatusBar.currentHeight || 40)
+    : 54;
 
 const MAX_ENERGY = 5;
 const ENERGY_PER_WIN = 2;
@@ -164,17 +166,18 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     const diffIndex = selectedDifficultyRef.current ?? 0;
     const preset = DIFFICULTY_PRESETS[diffIndex];
     const levelNum = preset.levelNum + (roundRef.current - 1) * 2;
-    const baseLevel = generateGridLevel(levelNum);
 
-    const p1 = JSON.parse(JSON.stringify(baseLevel)) as Level;
-    const p2 = JSON.parse(JSON.stringify(baseLevel)) as Level;
-    calculatePowerFlow(p1.tiles);
-    calculatePowerFlow(p2.tiles);
+    // Her oyuncuya bağımsız puzzle üret
+    const p1Level = generateGridLevel(levelNum);
+    const p2Level = generateGridLevel(levelNum);
 
-    setP1Level(p1);
-    setP2Level(p2);
-    p1LevelRef.current = p1;
-    p2LevelRef.current = p2;
+    calculatePowerFlow(p1Level.tiles);
+    calculatePowerFlow(p2Level.tiles);
+
+    setP1Level(p1Level);
+    setP2Level(p2Level);
+    p1LevelRef.current = p1Level;
+    p2LevelRef.current = p2Level;
     setP1Moves(0);
     setP2Moves(0);
     p1MovesRef.current = 0;
@@ -401,15 +404,17 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     const processedPlayers = new Set<number>();
 
     // P1 canvas sınırları (ekran koordinatları)
+    // P1: STATUS_BAR_HEIGHT + playerHeader + [ canvas ] + sabotageRow
     const p1CanvasContainerHeight = flexHeight - STATUS_BAR_HEIGHT - playerHeaderHeight - sabotageRowHeight;
     const p1CanvasTop = STATUS_BAR_HEIGHT + playerHeaderHeight;
     const p1CanvasBottom = p1CanvasTop + p1CanvasContainerHeight;
 
     // P2 canvas sınırları (ekran koordinatları, 180° dönüşüm hesaplı)
-    // P2 half screen alanı: flexHeight + dividerHeight → SCREEN_HEIGHT
-    // Dönüşüm sonrası: sabotageRow üstte (divider yanında), canvas ortada, header altta
+    // P2 half: flexHeight + dividerHeight -> SCREEN_HEIGHT
+    // 180° döndürülmüş sıra (ekrana göre): sabotageRow | canvas | playerHeader
+    const p2HalfTop = flexHeight + dividerHeight;
     const p2CanvasContainerHeight = flexHeight - playerHeaderHeight - sabotageRowHeight;
-    const p2CanvasTop = flexHeight + dividerHeight + sabotageRowHeight;
+    const p2CanvasTop = p2HalfTop + sabotageRowHeight;
     const p2CanvasBottom = p2CanvasTop + p2CanvasContainerHeight;
 
     for (const touch of touches) {
@@ -557,7 +562,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
                     <View pointerEvents="none" style={styles.previewCanvas}>
                       <CircuitCanvas
                         level={previewLevels[index]}
-                        onTilePress={() => {}}
+                        onTilePress={() => { }}
                         containerWidth={SCREEN_WIDTH * 0.35}
                         maxHeight={80}
                         strokeScale={0.5}
@@ -584,7 +589,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
                     {DIFFICULTY_PRESETS[previewModalIndex].label} ({DIFFICULTY_PRESETS[previewModalIndex].sublabel})
                   </Text>
                   <View pointerEvents="none">
-                    <CircuitCanvas level={previewLevels[previewModalIndex]} onTilePress={() => {}} containerWidth={SCREEN_WIDTH - 64} strokeScale={0.8} />
+                    <CircuitCanvas level={previewLevels[previewModalIndex]} onTilePress={() => { }} containerWidth={SCREEN_WIDTH - 64} strokeScale={0.8} />
                   </View>
                   <Text style={styles.previewModalHint}>Kapatmak için dokunun</Text>
                 </>
@@ -667,7 +672,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
           <View pointerEvents="none">
             <CircuitCanvas
               level={p1Level}
-              onTilePress={() => {}}
+              onTilePress={() => { }}
               isSolved={p1Level.isSolved}
               maxHeight={canvasMaxHeight}
               blackout={p1Blackout}
@@ -737,7 +742,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
           <View pointerEvents="none">
             <CircuitCanvas
               level={p2Level}
-              onTilePress={() => {}}
+              onTilePress={() => { }}
               isSolved={p2Level.isSolved}
               maxHeight={canvasMaxHeight}
               blackout={p2Blackout}

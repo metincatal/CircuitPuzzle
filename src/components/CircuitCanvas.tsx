@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import { View, Dimensions, Pressable, Animated, Easing } from 'react-native';
+import { View, Dimensions, Pressable, Animated, Easing, Platform } from 'react-native';
 import Svg, { Path, Circle, Rect, Polygon, G } from 'react-native-svg';
 import {
     Level,
@@ -41,11 +41,14 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
     const cx = half;
     const cy = half;
 
+    // Kenar noktalarını hücre sınırının biraz dışına uzat
+    // Web'de sub-pixel yuvarlama gaplerini önler
+    const ext = Platform.OS === 'web' ? cellSize * 0.04 : 0;
     const edgePoints: Record<string, { x: number; y: number }> = {
-        top: { x: cx, y: 0 },
-        right: { x: cellSize, y: cy },
-        bottom: { x: cx, y: cellSize },
-        left: { x: 0, y: cy },
+        top: { x: cx, y: -ext },
+        right: { x: cellSize + ext, y: cy },
+        bottom: { x: cx, y: cellSize + ext },
+        left: { x: -ext, y: cy },
     };
 
     const conns = Object.entries(baseConns).filter(([_, v]) => v).map(([k]) => k);
