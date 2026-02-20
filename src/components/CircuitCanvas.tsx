@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import { View, Dimensions, Pressable, Animated, Easing, Platform } from 'react-native';
+import { View, Dimensions, Pressable, Animated, Easing, Platform, StyleSheet } from 'react-native';
 import Svg, { Path, Circle, Rect, Polygon, G } from 'react-native-svg';
 import {
     Level,
@@ -22,7 +22,6 @@ export const COLORS = {
 
 const STROKE_WIDTH = 6;
 const NODE_RADIUS = 5;
-const SVG_OVERFLOW = STROKE_WIDTH; // SVG kenar taşması (clipping önleme)
 
 interface CircuitCanvasProps {
     level: Level;
@@ -34,21 +33,21 @@ interface CircuitCanvasProps {
     blackout?: boolean;
 }
 
-// Tile'ın base (rotation=0) halindeki SVG path'lerini hesapla (lokal koordinat: 0,0 -> cellSize,cellSize)
+// ===== ORTAK: Tile'ın base (rotation=0) halindeki SVG path'lerini hesapla =====
+// Lokal koordinat sistemi: (0,0) -> (cellSize, cellSize)
+// edgePoints hücre sınırında TAMI TAMINA durur (0 ve cellSize değerleri)
 const computeBasePaths = (tile: Tile, cellSize: number) => {
     const baseConns = tile.baseConnections;
     const half = cellSize / 2;
     const cx = half;
     const cy = half;
 
-    // Kenar noktalarını hücre sınırının biraz dışına uzat
-    // Web'de sub-pixel yuvarlama gaplerini önler
-    const ext = Platform.OS === 'web' ? cellSize * 0.04 : 0;
+    // Kenar noktaları: hücre sınırında tam
     const edgePoints: Record<string, { x: number; y: number }> = {
-        top: { x: cx, y: -ext },
-        right: { x: cellSize + ext, y: cy },
-        bottom: { x: cx, y: cellSize + ext },
-        left: { x: -ext, y: cy },
+        top: { x: cx, y: 0 },
+        right: { x: cellSize, y: cy },
+        bottom: { x: cx, y: cellSize },
+        left: { x: 0, y: cy },
     };
 
     const conns = Object.entries(baseConns).filter(([_, v]) => v).map(([k]) => k);
@@ -62,15 +61,12 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
     let switchIndicatorPath: string | undefined;
 
     if (tile.type === 'blocker') {
-        // Blocker: küçük dolgulu kare
         isBlocker = true;
         const size = cellSize * 0.3;
         paths.push(`M ${cx - size} ${cy - size} L ${cx + size} ${cy - size} L ${cx + size} ${cy + size} L ${cx - size} ${cy + size} Z`);
     } else if (tile.type === 'double-corner') {
-        // Double-corner (S-Curve): 2 bağımsız kavisli yol
         const bp = tile.bridgePaths || { pathA: ['top', 'right'] as const, pathB: ['bottom', 'left'] as const };
 
-        // PathA: çeyrek daire arc
         const cornerPointsMap: Record<string, { x: number; y: number }> = {
             'top-right': { x: cellSize, y: 0 },
             'right-top': { x: cellSize, y: 0 },
@@ -89,22 +85,17 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
             paths.push(`M ${pA1.x} ${pA1.y} Q ${cpA.x} ${cpA.y} ${pA2.x} ${pA2.y}`);
         }
 
-        // PathB: gap + bridge bump + kavisli yol
         const pB1 = edgePoints[bp.pathB[0]];
         const pB2 = edgePoints[bp.pathB[1]];
         const cpB = cornerPointsMap[`${bp.pathB[0]}-${bp.pathB[1]}`] || cornerPointsMap[`${bp.pathB[1]}-${bp.pathB[0]}`];
         if (pB1 && pB2 && cpB) {
-            // Kavisli yolu hesapla, ortada gap + bump ile
             const midX1 = pB1.x + (cpB.x - pB1.x) * 0.5;
             const midY1 = pB1.y + (cpB.y - pB1.y) * 0.5;
             const midX2 = cpB.x + (pB2.x - cpB.x) * 0.5;
             const midY2 = cpB.y + (pB2.y - cpB.y) * 0.5;
 
-            // İlk yarı
             paths.push(`M ${pB1.x} ${pB1.y} Q ${(pB1.x + cpB.x) / 2} ${(pB1.y + cpB.y) / 2} ${midX1} ${midY1}`);
-            // İkinci yarı
             paths.push(`M ${midX2} ${midY2} Q ${(cpB.x + pB2.x) / 2} ${(cpB.y + pB2.y) / 2} ${pB2.x} ${pB2.y}`);
-            // Bridge bump
             const bumpSize = cellSize * 0.15;
             const dx = midX2 - midX1;
             const dy = midY2 - midY1;
@@ -114,13 +105,11 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
             bridgeOverPath = `M ${midX1} ${midY1} C ${midX1 + px} ${midY1 + py} ${midX2 + px} ${midY2 + py} ${midX2} ${midY2}`;
         }
     } else if (tile.type === 'diode') {
-        // Diode: line gibi düz çizgi + ok göstergesi
         isDiode = true;
         const ep1 = edgePoints[conns[0]];
         const ep2 = edgePoints[conns[1]];
         if (ep1 && ep2) paths.push(`M ${ep1.x} ${ep1.y} L ${ep2.x} ${ep2.y}`);
 
-        // Ok işareti: diodeDirection yönüne bakan üçgen
         if (tile.diodeDirection) {
             const arrowSize = cellSize * 0.12;
             const dirMap: Record<string, { dx: number; dy: number }> = {
@@ -131,7 +120,6 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
             };
             const d = dirMap[tile.diodeDirection];
             if (d) {
-                // Üçgen ucu diode yönüne bakar
                 const tipX = cx + d.dx * arrowSize * 1.5;
                 const tipY = cy + d.dy * arrowSize * 1.5;
                 const baseX1 = cx - d.dy * arrowSize - d.dx * arrowSize * 0.5;
@@ -142,7 +130,6 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
             }
         }
     } else if (tile.type === 'switch') {
-        // Switch: aktif state'e göre çiz
         isSwitch = true;
         if (tile.switchStates) {
             const activeState = tile.switchState ? tile.switchStates.stateB : tile.switchStates.stateA;
@@ -176,7 +163,6 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
             }
         }
 
-        // Merkeze küçük eşkenar dörtgen göstergesi
         const ind = cellSize * 0.08;
         switchIndicatorPath = `M ${cx} ${cy - ind} L ${cx + ind} ${cy} L ${cx} ${cy + ind} L ${cx - ind} ${cy} Z`;
     } else if (tile.type === 'bridge') {
@@ -234,8 +220,6 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
             }
         }
     } else if (count >= 3) {
-        // Through-line yaklaşımı: karşılıklı yönleri kenardan kenara tek çizgi çiz
-        // Bu, merkezde round cap çakışmasından kaynaklanan pürüzleri önler
         const oppPairs: [string, string][] = [['top', 'bottom'], ['left', 'right']];
         const drawn = new Set<string>();
 
@@ -251,7 +235,6 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
             }
         }
 
-        // Kalan yönler merkezden kenara stub olarak çizilir
         for (const dir of conns) {
             if (!drawn.has(dir)) {
                 const ep = edgePoints[dir];
@@ -266,8 +249,8 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
     };
 };
 
-// Animasyonlu tile bileşeni
-const AnimatedTile: React.FC<{
+// ===== NATIVE RENDERER: Per-tile SVG yaklaşımı (mevcut, kusursuz çalışıyor) =====
+const NativeAnimatedTile: React.FC<{
     tile: Tile;
     cellSize: number;
     strokeColor: string;
@@ -307,7 +290,6 @@ const AnimatedTile: React.FC<{
         tile.switchState, tile.switchStates, tile.diodeDirection,
     ]);
 
-    // Switch için rotation animasyonu yerine scale pulse
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const prevSwitchState = useRef(tile.switchState);
 
@@ -331,7 +313,6 @@ const AnimatedTile: React.FC<{
         }
     }, [tile.switchState]);
 
-    // Switch döndürülmez, rotation animasyonu kullanılmaz
     const useRotation = tile.type !== 'switch' && tile.type !== 'blocker';
 
     return (
@@ -362,7 +343,6 @@ const AnimatedTile: React.FC<{
                     viewBox={`${-svgOverflow} ${-svgOverflow} ${cellSize + svgOverflow * 2} ${cellSize + svgOverflow * 2}`}
                     style={{ marginLeft: -svgOverflow, marginTop: -svgOverflow }}
                 >
-                    {/* Blackout: kablolar gizlenir, sadece source/bulb node'ları görünür */}
                     {!blackout && base.paths.map((d, i) => (
                         <Path
                             key={`p-${i}`}
@@ -411,115 +391,135 @@ const AnimatedTile: React.FC<{
     );
 });
 
-// ConnectionSeams: Komşu hücrelerin kablo birleşim noktalarında kısa dikiş çizgileri
-// Tek SVG'de tüm grid'i kaplayarak bağımsız tile SVG'leri arasındaki boşluğu kapatır
-const ConnectionSeams: React.FC<{
-    level: Level;
+// ===== WEB RENDERER: Tek SVG yaklaşımı =====
+// Tüm kablolar tek bir SVG koordinat sisteminde çizilir.
+// Komşu tile kablolarının birleşim noktaları aynı pikselde buluşur,
+// böylece sub-pixel gap sorunu fiziksel olarak imkansız hale gelir.
+
+const AnimatedG = Animated.createAnimatedComponent(G);
+
+// Web'de her tile'ın kablolarını tek SVG içinde <G> ile çizen bileşen
+const WebTilePaths: React.FC<{
+    tile: Tile;
     cellSize: number;
-    isSolved: boolean;
+    strokeColor: string;
     strokeScale: number;
-    blackout: boolean;
-}> = React.memo(({ level, cellSize, isSolved, strokeScale, blackout }) => {
-    if (blackout) return null;
-
+    blackout?: boolean;
+}> = React.memo(({ tile, cellSize, strokeColor, strokeScale, blackout }) => {
     const sw = STROKE_WIDTH * strokeScale;
-    const seamLen = cellSize * 0.12; // Dikiş yarı-uzunluğu
-    const totalWidth = cellSize * level.cols;
-    const totalHeight = cellSize * level.rows;
+    const nr = NODE_RADIUS * strokeScale;
+    const half = cellSize / 2;
+    const ox = tile.position.col * cellSize;
+    const oy = tile.position.row * cellSize;
 
-    const cableColor = isSolved ? COLORS.solvedActive : COLORS.active;
-    const passiveColor = COLORS.passive;
+    // === Rotation animasyonu ===
+    const animRotation = useRef(new Animated.Value(tile.rotation * 90)).current;
+    const prevRotation = useRef(tile.rotation);
 
-    // Tile'ları pozisyon haritasına dönüştür
-    const tileMap = useMemo(() => {
-        const map = new Map<string, Tile>();
-        level.tiles.forEach(t => map.set(`${t.position.row},${t.position.col}`, t));
-        return map;
-    }, [level.tiles]);
-
-    // Dikiş çizgilerini hesapla
-    const seams = useMemo(() => {
-        const result: { x1: number; y1: number; x2: number; y2: number; color: string }[] = [];
-
-        for (let row = 0; row < level.rows; row++) {
-            for (let col = 0; col < level.cols; col++) {
-                const tile = tileMap.get(`${row},${col}`);
-                if (!tile) continue;
-
-                const conns = getActiveConnections(tile);
-
-                // Sağ komşu ile yatay dikiş
-                if (col < level.cols - 1 && conns.right) {
-                    const rightTile = tileMap.get(`${row},${col + 1}`);
-                    if (rightTile) {
-                        const rightConns = getActiveConnections(rightTile);
-                        if (rightConns.left) {
-                            const x = (col + 1) * cellSize;
-                            const y = row * cellSize + cellSize / 2;
-                            // İki tile'dan birisi powered ise active renk, değilse passive
-                            const bothPowered = tile.isPowered && rightTile.isPowered;
-                            const color = bothPowered ? cableColor : passiveColor;
-                            result.push({
-                                x1: x - seamLen, y1: y,
-                                x2: x + seamLen, y2: y,
-                                color,
-                            });
-                        }
-                    }
-                }
-
-                // Alt komşu ile dikey dikiş
-                if (row < level.rows - 1 && conns.bottom) {
-                    const bottomTile = tileMap.get(`${row + 1},${col}`);
-                    if (bottomTile) {
-                        const bottomConns = getActiveConnections(bottomTile);
-                        if (bottomConns.top) {
-                            const x = col * cellSize + cellSize / 2;
-                            const y = (row + 1) * cellSize;
-                            const bothPowered = tile.isPowered && bottomTile.isPowered;
-                            const color = bothPowered ? cableColor : passiveColor;
-                            result.push({
-                                x1: x, y1: y - seamLen,
-                                x2: x, y2: y + seamLen,
-                                color,
-                            });
-                        }
-                    }
-                }
-            }
+    useEffect(() => {
+        if (tile.rotation !== prevRotation.current) {
+            const current = prevRotation.current * 90;
+            const target = current + 90;
+            animRotation.setValue(current);
+            Animated.timing(animRotation, {
+                toValue: target,
+                duration: 200,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: false, // SVG prop'ları native driver desteklemez
+            }).start();
+            prevRotation.current = tile.rotation;
         }
+    }, [tile.rotation]);
 
-        return result;
-    }, [level.tiles, cellSize, cableColor, passiveColor, tileMap]);
+    // === Switch scale animasyonu ===
+    const scaleAnim = useRef(new Animated.Value(1)).current;
+    const prevSwitchState = useRef(tile.switchState);
 
-    if (seams.length === 0) return null;
+    useEffect(() => {
+        if (tile.type === 'switch' && tile.switchState !== prevSwitchState.current) {
+            prevSwitchState.current = tile.switchState;
+            Animated.sequence([
+                Animated.timing(scaleAnim, {
+                    toValue: 1.1, duration: 100,
+                    easing: Easing.out(Easing.cubic),
+                    useNativeDriver: false,
+                }),
+                Animated.timing(scaleAnim, {
+                    toValue: 1, duration: 100,
+                    easing: Easing.in(Easing.cubic),
+                    useNativeDriver: false,
+                }),
+            ]).start();
+        }
+    }, [tile.switchState]);
 
+    // === Base path'leri hesapla ===
+    const base = useMemo(() => computeBasePaths(tile, cellSize), [
+        tile.type, tile.baseConnections, tile.bridgePaths, cellSize,
+        tile.switchState, tile.switchStates, tile.diodeDirection,
+    ]);
+
+    const useRotation = tile.type !== 'switch' && tile.type !== 'blocker';
+
+    // G grubu: tile'ın hücresel ofsetine konumlanır, merkezinden döner
     return (
-        <View pointerEvents="none" style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: totalWidth,
-            height: totalHeight,
-            zIndex: 10,
-        }}>
-            <Svg width={totalWidth} height={totalHeight}>
-                {seams.map((s, i) => (
-                    <Path
-                        key={`seam-${i}`}
-                        d={`M ${s.x1} ${s.y1} L ${s.x2} ${s.y2}`}
-                        stroke={s.color}
-                        strokeWidth={sw}
-                        strokeLinecap="round"
-                        fill="none"
-                    />
-                ))}
-            </Svg>
-        </View>
+        <AnimatedG
+            x={ox}
+            y={oy}
+            rotation={useRotation ? animRotation : 0}
+            originX={half}
+            originY={half}
+            scale={tile.type === 'switch' ? scaleAnim : 1}
+        >
+            {/* Kablo path'leri */}
+            {!blackout && base.paths.map((d, i) => (
+                <Path
+                    key={`p-${i}`}
+                    d={d}
+                    stroke={strokeColor}
+                    strokeWidth={sw}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill={base.isBlocker ? strokeColor : 'none'}
+                />
+            ))}
+            {!blackout && base.bridgeOverPath && (
+                <Path
+                    d={base.bridgeOverPath}
+                    stroke={strokeColor}
+                    strokeWidth={sw}
+                    strokeLinecap="round"
+                    fill="none"
+                />
+            )}
+            {!blackout && base.diodeArrowPath && (
+                <Path
+                    d={base.diodeArrowPath}
+                    fill={strokeColor}
+                    stroke="none"
+                />
+            )}
+            {!blackout && base.switchIndicatorPath && (
+                <Path
+                    d={base.switchIndicatorPath}
+                    fill={strokeColor}
+                    stroke="none"
+                />
+            )}
+            {(base.isSource || base.isBulb) && (
+                <Circle
+                    cx={half}
+                    cy={half}
+                    r={nr + 2 * strokeScale}
+                    fill={blackout ? COLORS.passive : strokeColor}
+                />
+            )}
+        </AnimatedG>
     );
 });
 
-export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
+// Web CircuitCanvas: Tek SVG + touch overlay
+const WebCircuitCanvas: React.FC<CircuitCanvasProps> = ({
     level,
     onTilePress,
     isSolved = false,
@@ -528,6 +528,88 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
     strokeScale = 1,
     blackout = false,
 }) => {
+    const canvasWidth = containerWidth ?? (SCREEN_WIDTH - 20);
+    const cellW = canvasWidth / level.cols;
+    const cellH = maxHeight ? maxHeight / level.rows : cellW;
+    const cellSize = Math.min(cellW, cellH);
+    const actualWidth = cellSize * level.cols;
+    const canvasHeight = cellSize * level.rows;
+    const svgPad = STROKE_WIDTH * strokeScale; // Kenar taşması payı
+
+    const cableColor = isSolved ? COLORS.solvedActive : COLORS.active;
+    const passiveColor = COLORS.passive;
+
+    return (
+        <View style={{
+            width: actualWidth,
+            height: canvasHeight,
+            overflow: 'visible',
+        }}>
+            {/* TEK SVG: Tüm kablolar burada çizilir */}
+            <View
+                pointerEvents="none"
+                style={{
+                    position: 'absolute',
+                    left: -svgPad,
+                    top: -svgPad,
+                    width: actualWidth + svgPad * 2,
+                    height: canvasHeight + svgPad * 2,
+                }}
+            >
+                <Svg
+                    width={actualWidth + svgPad * 2}
+                    height={canvasHeight + svgPad * 2}
+                    viewBox={`${-svgPad} ${-svgPad} ${actualWidth + svgPad * 2} ${canvasHeight + svgPad * 2}`}
+                >
+                    {level.tiles.map(tile => {
+                        const color = tile.isPowered ? cableColor : passiveColor;
+                        const strokeColor = (tile.fixed && tile.type !== 'source' && !tile.isPowered) ? COLORS.fixed : color;
+
+                        return (
+                            <WebTilePaths
+                                key={tile.id}
+                                tile={tile}
+                                cellSize={cellSize}
+                                strokeColor={strokeColor}
+                                strokeScale={strokeScale}
+                                blackout={blackout}
+                            />
+                        );
+                    })}
+                </Svg>
+            </View>
+
+            {/* TOUCH OVERLAY: Görünmez Pressable'lar dokunma olaylarını yakalar */}
+            {level.tiles.map(tile => (
+                <Pressable
+                    key={`touch-${tile.id}`}
+                    style={{
+                        position: 'absolute',
+                        left: tile.position.col * cellSize,
+                        top: tile.position.row * cellSize,
+                        width: cellSize,
+                        height: cellSize,
+                    }}
+                    onPress={() => onTilePress(tile.id)}
+                />
+            ))}
+        </View>
+    );
+};
+
+// ===== MAIN COMPONENT: Platform'a göre renderer seç =====
+export const CircuitCanvas: React.FC<CircuitCanvasProps> = (props) => {
+    // Web: Tek SVG ile kusursuz kablo birleşimleri
+    if (Platform.OS === 'web') {
+        return <WebCircuitCanvas {...props} />;
+    }
+
+    // Native: Per-tile SVG yaklaşımı (zaten kusursuz)
+    const {
+        level, onTilePress, isSolved = false,
+        maxHeight, containerWidth, strokeScale = 1, blackout = false,
+    } = props;
+
     const canvasWidth = containerWidth ?? (SCREEN_WIDTH - 20);
     const cellW = canvasWidth / level.cols;
     const cellH = maxHeight ? maxHeight / level.rows : cellW;
@@ -549,7 +631,7 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
                 const strokeColor = (tile.fixed && tile.type !== 'source' && !tile.isPowered) ? COLORS.fixed : color;
 
                 return (
-                    <AnimatedTile
+                    <NativeAnimatedTile
                         key={tile.id}
                         tile={tile}
                         cellSize={cellSize}
@@ -560,17 +642,6 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
                     />
                 );
             })}
-
-            {/* ConnectionSeams: Kablo birleşim dikişleri */}
-            {Platform.OS === 'web' && (
-                <ConnectionSeams
-                    level={level}
-                    cellSize={cellSize}
-                    isSolved={isSolved}
-                    strokeScale={strokeScale}
-                    blackout={blackout}
-                />
-            )}
         </View>
     );
 };
