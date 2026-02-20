@@ -119,15 +119,14 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
 
   // Ekran hesaplamaları
   const dividerHeight = 26;
-  const sabotageRowHeight = 28;
-  const playerHeaderHeight = 40;
+  const miniBarHeight = 24; // minimal üst bar (win dots + round)
+  const sabotageRowHeight = 36; // sabotaj butonları (daha geniş)
   // Her playerHalf flex:1 alır, gerçek piksel yüksekliği:
   const flexHeight = (SCREEN_HEIGHT - dividerHeight) / 2;
-  // P1'in status bar padding'i var, bu yüzden P1 canvas daha küçük - onu baz alıyoruz
-  const canvasMaxHeight = flexHeight - STATUS_BAR_HEIGHT - playerHeaderHeight - sabotageRowHeight - 8;
+  const canvasMaxHeight = flexHeight - STATUS_BAR_HEIGHT - miniBarHeight - sabotageRowHeight - 4;
 
   const getCellSize = (level: Level) => {
-    const canvasWidth = SCREEN_WIDTH - 20;
+    const canvasWidth = SCREEN_WIDTH - 16;
     const cellW = canvasWidth / level.cols;
     const cellH = canvasMaxHeight / level.rows;
     return Math.min(cellW, cellH);
@@ -391,7 +390,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     });
   }, []);
 
-  // ======== TOUCH HANDLER: Tek root handler, pageX/pageY ile multi-touch ========
+  // ======== TOUCH HANDLER ========
   const handleRootTouch = useCallback((e: GestureResponderEvent) => {
     if (gamePhaseRef.current !== 'playing') return;
 
@@ -403,23 +402,16 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     const processedPlayers = new Set<number>();
 
     // P1 (üst yarı, 180° döndürülmüş)
-    // Layout sırası (ekrana göre): sabotageRow | overlays/canvas | playerHeader | STATUS_BAR padding
-    // Ama 180° dönüş nedeniyle ekrandaki görünüm ters:
-    // Ekranda yukarıdan aşağı: [padding(status)] [header] [canvas] [sabotageRow]
-    // flex:1 playerHalf yüksekliği = flexHeight
-    // P1 alanı: 0 -> flexHeight
-    const p1CanvasContainerHeight = flexHeight - STATUS_BAR_HEIGHT - playerHeaderHeight - sabotageRowHeight;
-    // 180° döndürülmüş olduğundan, ekranda header ve padding üstte, sabotageRow altta
-    // Canvas alanı: STATUS_BAR_HEIGHT + playerHeaderHeight -> flexHeight - sabotageRowHeight
-    const p1CanvasTop = STATUS_BAR_HEIGHT + playerHeaderHeight;
+    // Ekranda: [status_pad] [miniBar] [canvas] [sabotageRow] | divider | P2
+    const p1CanvasContainerHeight = flexHeight - STATUS_BAR_HEIGHT - miniBarHeight - sabotageRowHeight;
+    const p1CanvasTop = STATUS_BAR_HEIGHT + miniBarHeight;
     const p1CanvasBottom = p1CanvasTop + p1CanvasContainerHeight;
 
     // P2 (alt yarı, normal/düz)
-    // Layout: playerHeader | canvas | sabotageRow
-    // P2 alanı: flexHeight + dividerHeight -> SCREEN_HEIGHT
+    // Ekranda: divider | [miniBar] [canvas] [sabotageRow]
     const p2HalfTop = flexHeight + dividerHeight;
-    const p2CanvasContainerHeight = flexHeight - playerHeaderHeight - sabotageRowHeight;
-    const p2CanvasTop = p2HalfTop + playerHeaderHeight;
+    const p2CanvasContainerHeight = flexHeight - miniBarHeight - sabotageRowHeight;
+    const p2CanvasTop = p2HalfTop + miniBarHeight;
     const p2CanvasBottom = p2CanvasTop + p2CanvasContainerHeight;
 
     for (const touch of touches) {
@@ -432,13 +424,11 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
 
       if (pageY >= p1CanvasTop && pageY <= p1CanvasBottom) {
         player = 1;
-        // P1 180° döndürülmüş: koordinatları ters çevir
         canvasX = SCREEN_WIDTH - pageX;
         canvasY = p1CanvasBottom - pageY;
         containerHeight = p1CanvasContainerHeight;
       } else if (pageY >= p2CanvasTop && pageY <= p2CanvasBottom) {
         player = 2;
-        // P2 normal: doğrudan koordinatlar
         canvasX = pageX;
         canvasY = pageY - p2CanvasTop;
         containerHeight = p2CanvasContainerHeight;
@@ -478,20 +468,6 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     setSelectedDifficulty(null); selectedDifficultyRef.current = null;
     setGamePhase('setup'); gamePhaseRef.current = 'setup';
   };
-
-  // ======== ENERJİ BARI ========
-  const EnergyBar = ({ energy, color }: { energy: number; color: string }) => (
-    <View style={styles.energyBar}>
-      {Array.from({ length: MAX_ENERGY }).map((_, i) => (
-        <View key={i} style={[styles.energyDot, {
-          backgroundColor: i < energy ? color : `${color}20`,
-          borderColor: `${color}40`,
-        }]}>
-          {i < energy && <Zap size={7} color="#fff" />}
-        </View>
-      ))}
-    </View>
-  );
 
   // ======== SABOTAJ BUTONU ========
   const SabotageButton = ({ type, player, energy, color }: {
@@ -640,29 +616,15 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     <View style={styles.container} onTouchEnd={handleRootTouch}>
       <StatusBar style="dark" />
 
-      {/* Flash efekti */}
-      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, {
-        backgroundColor: DUEL_COLOR,
-        opacity: winnerFlash.interpolate({ inputRange: [0, 1], outputRange: [0, 0.2] }),
-        zIndex: 90,
-      }]} />
-
-      {/* ÜST YARI - Oyuncu 1 (180° döndürülmüş - telefonun yukarısındaki oyuncu) */}
+      {/* ÜST YARI - Oyuncu 1 (180° döndürülmüş) */}
       <View style={[styles.playerHalf, { paddingTop: STATUS_BAR_HEIGHT, transform: [{ rotate: '180deg' }] }]}>
-        <View style={styles.playerHeader}>
-          <View style={styles.backBtnPlaceholder} />
-          <View style={styles.playerInfo}>
-            <Text style={styles.playerLabel}>OYUNCU 1</Text>
-            <View style={styles.statsRow}>
-              <Text style={styles.moveText}>{p1Moves} hamle</Text>
-              <View style={styles.winsContainer}>
-                {Array.from({ length: currentTotalRounds }).map((_, i) => (
-                  <View key={i} style={[styles.winDot, i < p1Wins && styles.winDotActive]} />
-                ))}
-              </View>
-            </View>
+        {/* Mini bar: win dots + round */}
+        <View style={styles.miniBar}>
+          <View style={styles.winsContainer}>
+            {Array.from({ length: currentTotalRounds }).map((_, i) => (
+              <View key={i} style={[styles.winDot, i < p1Wins && styles.winDotActive]} />
+            ))}
           </View>
-          <EnergyBar energy={p1Energy} color={DUEL_COLOR} />
           <View style={styles.roundBadge}>
             <Text style={styles.roundBadgeText}>R{round}</Text>
           </View>
@@ -689,7 +651,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
           </View>
         )}
         {p1Blackout && (
-          <View pointerEvents="none" style={[styles.effectTimerBadge, { top: playerHeaderHeight + 4 }]}>
+          <View pointerEvents="none" style={[styles.effectTimerBadge, { top: miniBarHeight + 4 }]}>
             <EyeOff size={12} color="rgba(0,0,0,0.6)" />
             <Text style={styles.effectTimerBadgeText}>{p1BlackoutTimer}</Text>
           </View>
@@ -699,16 +661,16 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
             <Text style={styles.sabotageAlertText}>{p1SabotageAlert}</Text>
           </Animated.View>
         )}
+
         {/* P1 Sabotaj Butonları */}
         <View style={styles.sabotageRow}>
           <SabotageButton type="shuffle" player={1} energy={p1Energy} color={DUEL_COLOR} />
           <SabotageButton type="blackout" player={1} energy={p1Energy} color={DUEL_COLOR} />
           <SabotageButton type="freeze" player={1} energy={p1Energy} color={DUEL_COLOR} />
         </View>
-
       </View>
 
-      {/* ORTA BÖLÜCÜ - Sadece VS */}
+      {/* ORTA BÖLÜCÜ */}
       <View style={styles.divider}>
         <View style={styles.dividerCenter}>
           <View style={styles.dividerLine} />
@@ -717,27 +679,21 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
         </View>
       </View>
 
-      {/* ALT YARI - Oyuncu 2 (normal/düz - telefonun altındaki oyuncu) */}
+      {/* ALT YARI - Oyuncu 2 (normal/düz) */}
       <View style={styles.playerHalf}>
-        <View style={styles.playerHeader}>
+        {/* Mini bar: back + win dots + round */}
+        <View style={styles.miniBar}>
           <Pressable
-            style={({ pressed }) => [styles.backBtn, pressed && styles.btnPressed]}
+            style={({ pressed }) => [styles.miniBackBtn, pressed && styles.btnPressed]}
             onPress={onBack}
           >
-            <ArrowLeft size={18} color={P2_COLOR} />
+            <ArrowLeft size={14} color={P2_COLOR} />
           </Pressable>
-          <View style={styles.playerInfo}>
-            <Text style={[styles.playerLabel, styles.p2Label]}>OYUNCU 2</Text>
-            <View style={styles.statsRow}>
-              <Text style={styles.moveText}>{p2Moves} hamle</Text>
-              <View style={styles.winsContainer}>
-                {Array.from({ length: currentTotalRounds }).map((_, i) => (
-                  <View key={i} style={[styles.winDot, i < p2Wins && styles.winDotActiveP2]} />
-                ))}
-              </View>
-            </View>
+          <View style={styles.winsContainer}>
+            {Array.from({ length: currentTotalRounds }).map((_, i) => (
+              <View key={i} style={[styles.winDot, i < p2Wins && styles.winDotActiveP2]} />
+            ))}
           </View>
-          <EnergyBar energy={p2Energy} color={P2_COLOR} />
           <View style={[styles.roundBadge, styles.roundBadgeP2]}>
             <Text style={[styles.roundBadgeText, { color: P2_COLOR }]}>R{round}</Text>
           </View>
@@ -764,7 +720,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
           </View>
         )}
         {p2Blackout && (
-          <View pointerEvents="none" style={[styles.effectTimerBadge, { top: playerHeaderHeight + 4 }]}>
+          <View pointerEvents="none" style={[styles.effectTimerBadge, { top: miniBarHeight + 4 }]}>
             <EyeOff size={12} color="rgba(0,0,0,0.6)" />
             <Text style={styles.effectTimerBadgeText}>{p2BlackoutTimer}</Text>
           </View>
@@ -781,24 +737,38 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
           <SabotageButton type="blackout" player={2} energy={p2Energy} color={P2_COLOR} />
           <SabotageButton type="freeze" player={2} energy={p2Energy} color={P2_COLOR} />
         </View>
-
       </View>
 
-      {/* KAZANDI OVERLAY - Ekranın tam yarısını kapsar (divider dahil) */}
+      {/* ROUND KAZANMA — sade, minimal */}
       {roundWinner && gamePhase === 'roundEnd' && (
-        <View
-          pointerEvents="none"
-          style={[
-            styles.winOverlay,
-            roundWinner === 1
-              ? { top: 0, height: flexHeight + dividerHeight }
-              : { bottom: 0, height: flexHeight + dividerHeight },
-          ]}
-        >
-          <View style={roundWinner === 2 ? { transform: [{ rotate: '180deg' }] } : undefined}>
-            <Text style={styles.winOverlayText}>KAZANDI!</Text>
+        <>
+          {/* Kazanan yarıda hafif yeşil tint */}
+          <View
+            pointerEvents="none"
+            style={[
+              styles.winOverlay,
+              roundWinner === 1
+                ? { top: 0, height: flexHeight }
+                : { bottom: 0, height: flexHeight },
+              { backgroundColor: 'rgba(74,139,92,0.12)' },
+            ]}
+          >
+            <View style={roundWinner === 1 ? { transform: [{ rotate: '180deg' }] } : undefined}>
+              <Text style={styles.winCheckText}>✓</Text>
+            </View>
           </View>
-        </View>
+          {/* Kaybeden yarıda soluk kırmızı tint */}
+          <View
+            pointerEvents="none"
+            style={[
+              styles.winOverlay,
+              roundWinner === 1
+                ? { bottom: 0, height: flexHeight }
+                : { top: 0, height: flexHeight },
+              { backgroundColor: 'rgba(184,70,52,0.08)' },
+            ]}
+          />
+        </>
       )}
 
       {/* GAME OVER MODAL */}
@@ -820,9 +790,6 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
                 <Text style={[styles.finalScoreValue, overallWinner === 2 && styles.finalScoreWinner]}>{p2Wins}</Text>
               </View>
             </View>
-            {sabotagesUsedRef.current > 0 && (
-              <Text style={styles.sabotageStatText}>Toplam {sabotagesUsedRef.current} sabotaj kullanıldı</Text>
-            )}
             <View style={styles.modalButtons}>
               <Pressable
                 style={({ pressed }) => [styles.modalBtn, styles.playAgainBtn, pressed && styles.btnPressed]}
@@ -919,41 +886,28 @@ const styles = StyleSheet.create({
 
   // ======== OYUN EKRANI ========
   playerHalf: { flex: 1, overflow: 'hidden' },
-  playerHeader: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, height: 40,
+  miniBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 12, height: 24, gap: 8,
   },
-  backBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: 'rgba(123,94,167,0.08)',
+  miniBackBtn: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: 'rgba(193,122,58,0.1)',
     alignItems: 'center', justifyContent: 'center',
   },
-  backBtnPlaceholder: { width: 32, height: 32 },
-  playerInfo: { flex: 1, marginLeft: 10 },
-  playerLabel: { fontSize: 11, fontWeight: '800', color: DUEL_COLOR, letterSpacing: 2 },
-  p2Label: { color: P2_COLOR },
-  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  moveText: { fontSize: 11, fontWeight: '600', color: 'rgba(107,123,58,0.4)', fontVariant: ['tabular-nums'] },
   winsContainer: { flexDirection: 'row', gap: 4 },
   winDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(123,94,167,0.15)' },
   winDotActive: { backgroundColor: DUEL_COLOR },
   winDotActiveP2: { backgroundColor: P2_COLOR },
   roundBadge: {
     backgroundColor: 'rgba(123,94,167,0.1)',
-    paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 8, marginLeft: 6,
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 6,
   },
   roundBadgeP2: { backgroundColor: 'rgba(193,122,58,0.1)' },
-  roundBadgeText: { fontSize: 11, fontWeight: '700', color: DUEL_COLOR },
+  roundBadgeText: { fontSize: 10, fontWeight: '700', color: DUEL_COLOR },
   canvasContainer: {
     flex: 1, justifyContent: 'center', alignItems: 'center', overflow: 'visible',
-  },
-
-  // ======== ENERJİ ========
-  energyBar: { flexDirection: 'row', gap: 3, marginRight: 6 },
-  energyDot: {
-    width: 16, height: 16, borderRadius: 8,
-    borderWidth: 1, alignItems: 'center', justifyContent: 'center',
   },
 
   // ======== BÖLÜCÜ & SABOTAJ ========
@@ -966,14 +920,17 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginHorizontal: 6,
   },
   vsText: { fontSize: 10, fontWeight: '800', color: DUEL_COLOR, letterSpacing: 1 },
-  sabotageRow: { flexDirection: 'row', justifyContent: 'center', gap: 12, height: 28, alignItems: 'center' },
+  sabotageRow: {
+    flexDirection: 'row', justifyContent: 'center', gap: 16,
+    height: 36, alignItems: 'center', paddingHorizontal: 16,
+  },
   sabotageBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12,
     backgroundColor: 'rgba(123,94,167,0.06)',
   },
   sabotageBtnDisabled: { opacity: 0.4 },
-  sabotageCost: { fontSize: 10, fontWeight: '800' },
+  sabotageCost: { fontSize: 11, fontWeight: '800' },
 
   // ======== SABOTAJ EFEKT OVERLAY'LER ========
   effectOverlay: {
@@ -998,11 +955,10 @@ const styles = StyleSheet.create({
   // ======== WIN OVERLAY ========
   winOverlay: {
     position: 'absolute', left: 0, right: 0,
-    backgroundColor: 'rgba(123,94,167,0.15)',
     justifyContent: 'center', alignItems: 'center',
     zIndex: 80,
   },
-  winOverlayText: { fontSize: 28, fontWeight: '800', color: DUEL_COLOR, letterSpacing: 4 },
+  winCheckText: { fontSize: 48, fontWeight: '300', color: '#4A8B5C' },
 
   // ======== GAME OVER MODAL ========
   modalOverlay: {
@@ -1030,7 +986,6 @@ const styles = StyleSheet.create({
   },
   finalScoreWinner: { color: DUEL_COLOR },
   finalScoreDash: { fontSize: 28, fontWeight: '300', color: 'rgba(107,123,58,0.2)', marginTop: 16 },
-  sabotageStatText: { fontSize: 13, fontWeight: '600', color: 'rgba(123,94,167,0.5)', marginBottom: 20 },
   modalButtons: { width: '100%', gap: 10 },
   modalBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
