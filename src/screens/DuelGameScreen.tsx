@@ -166,18 +166,18 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     const diffIndex = selectedDifficultyRef.current ?? 0;
     const preset = DIFFICULTY_PRESETS[diffIndex];
     const levelNum = preset.levelNum + (roundRef.current - 1) * 2;
+    const baseLevel = generateGridLevel(levelNum);
 
-    // Her oyuncuya bağımsız puzzle üret
-    const p1Level = generateGridLevel(levelNum);
-    const p2Level = generateGridLevel(levelNum);
+    // Aynı puzzle her iki oyuncuya da verilir
+    const p1 = JSON.parse(JSON.stringify(baseLevel)) as Level;
+    const p2 = JSON.parse(JSON.stringify(baseLevel)) as Level;
+    calculatePowerFlow(p1.tiles);
+    calculatePowerFlow(p2.tiles);
 
-    calculatePowerFlow(p1Level.tiles);
-    calculatePowerFlow(p2Level.tiles);
-
-    setP1Level(p1Level);
-    setP2Level(p2Level);
-    p1LevelRef.current = p1Level;
-    p2LevelRef.current = p2Level;
+    setP1Level(p1);
+    setP2Level(p2);
+    p1LevelRef.current = p1;
+    p2LevelRef.current = p2;
     setP1Moves(0);
     setP2Moves(0);
     p1MovesRef.current = 0;
@@ -400,21 +400,26 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
       ? Array.from(nativeEvent.changedTouches) as any[]
       : [nativeEvent];
 
-    // Aynı event'te bir oyuncuyu birden fazla işlemekten kaçın
     const processedPlayers = new Set<number>();
 
-    // P1 canvas sınırları (ekran koordinatları)
-    // P1: STATUS_BAR_HEIGHT + playerHeader + [ canvas ] + sabotageRow
+    // P1 (üst yarı, 180° döndürülmüş)
+    // Layout sırası (ekrana göre): sabotageRow | overlays/canvas | playerHeader | STATUS_BAR padding
+    // Ama 180° dönüş nedeniyle ekrandaki görünüm ters:
+    // Ekranda yukarıdan aşağı: [padding(status)] [header] [canvas] [sabotageRow]
+    // flex:1 playerHalf yüksekliği = flexHeight
+    // P1 alanı: 0 -> flexHeight
     const p1CanvasContainerHeight = flexHeight - STATUS_BAR_HEIGHT - playerHeaderHeight - sabotageRowHeight;
+    // 180° döndürülmüş olduğundan, ekranda header ve padding üstte, sabotageRow altta
+    // Canvas alanı: STATUS_BAR_HEIGHT + playerHeaderHeight -> flexHeight - sabotageRowHeight
     const p1CanvasTop = STATUS_BAR_HEIGHT + playerHeaderHeight;
     const p1CanvasBottom = p1CanvasTop + p1CanvasContainerHeight;
 
-    // P2 canvas sınırları (ekran koordinatları, 180° dönüşüm hesaplı)
-    // P2 half: flexHeight + dividerHeight -> SCREEN_HEIGHT
-    // 180° döndürülmüş sıra (ekrana göre): sabotageRow | canvas | playerHeader
+    // P2 (alt yarı, normal/düz)
+    // Layout: playerHeader | canvas | sabotageRow
+    // P2 alanı: flexHeight + dividerHeight -> SCREEN_HEIGHT
     const p2HalfTop = flexHeight + dividerHeight;
     const p2CanvasContainerHeight = flexHeight - playerHeaderHeight - sabotageRowHeight;
-    const p2CanvasTop = p2HalfTop + sabotageRowHeight;
+    const p2CanvasTop = p2HalfTop + playerHeaderHeight;
     const p2CanvasBottom = p2CanvasTop + p2CanvasContainerHeight;
 
     for (const touch of touches) {
@@ -427,14 +432,15 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
 
       if (pageY >= p1CanvasTop && pageY <= p1CanvasBottom) {
         player = 1;
-        canvasX = pageX;
-        canvasY = pageY - p1CanvasTop;
+        // P1 180° döndürülmüş: koordinatları ters çevir
+        canvasX = SCREEN_WIDTH - pageX;
+        canvasY = p1CanvasBottom - pageY;
         containerHeight = p1CanvasContainerHeight;
       } else if (pageY >= p2CanvasTop && pageY <= p2CanvasBottom) {
         player = 2;
-        // P2 180° döndürülmüş: koordinatları çevir
-        canvasX = SCREEN_WIDTH - pageX;
-        canvasY = p2CanvasBottom - pageY;
+        // P2 normal: doğrudan koordinatlar
+        canvasX = pageX;
+        canvasY = pageY - p2CanvasTop;
         containerHeight = p2CanvasContainerHeight;
       }
 
@@ -641,15 +647,10 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
         zIndex: 90,
       }]} />
 
-      {/* ÜST YARI - Oyuncu 1 */}
-      <View style={[styles.playerHalf, { paddingTop: STATUS_BAR_HEIGHT }]}>
+      {/* ÜST YARI - Oyuncu 1 (180° döndürülmüş - telefonun yukarısındaki oyuncu) */}
+      <View style={[styles.playerHalf, { paddingTop: STATUS_BAR_HEIGHT, transform: [{ rotate: '180deg' }] }]}>
         <View style={styles.playerHeader}>
-          <Pressable
-            style={({ pressed }) => [styles.backBtn, pressed && styles.btnPressed]}
-            onPress={onBack}
-          >
-            <ArrowLeft size={18} color={DUEL_COLOR} />
-          </Pressable>
+          <View style={styles.backBtnPlaceholder} />
           <View style={styles.playerInfo}>
             <Text style={styles.playerLabel}>OYUNCU 1</Text>
             <View style={styles.statsRow}>
@@ -688,7 +689,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
           </View>
         )}
         {p1Blackout && (
-          <View pointerEvents="none" style={[styles.effectTimerBadge, { top: playerHeaderHeight + STATUS_BAR_HEIGHT + 4 }]}>
+          <View pointerEvents="none" style={[styles.effectTimerBadge, { top: playerHeaderHeight + 4 }]}>
             <EyeOff size={12} color="rgba(0,0,0,0.6)" />
             <Text style={styles.effectTimerBadgeText}>{p1BlackoutTimer}</Text>
           </View>
@@ -698,7 +699,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
             <Text style={styles.sabotageAlertText}>{p1SabotageAlert}</Text>
           </Animated.View>
         )}
-        {/* P1 Sabotaj Butonları - playerHalf içinde, overlay kapsamında */}
+        {/* P1 Sabotaj Butonları */}
         <View style={styles.sabotageRow}>
           <SabotageButton type="shuffle" player={1} energy={p1Energy} color={DUEL_COLOR} />
           <SabotageButton type="blackout" player={1} energy={p1Energy} color={DUEL_COLOR} />
@@ -716,10 +717,15 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
         </View>
       </View>
 
-      {/* ALT YARI - Oyuncu 2 (180° döndürülmüş) */}
-      <View style={[styles.playerHalf, { transform: [{ rotate: '180deg' }] }]}>
+      {/* ALT YARI - Oyuncu 2 (normal/düz - telefonun altındaki oyuncu) */}
+      <View style={styles.playerHalf}>
         <View style={styles.playerHeader}>
-          <View style={styles.backBtnPlaceholder} />
+          <Pressable
+            style={({ pressed }) => [styles.backBtn, pressed && styles.btnPressed]}
+            onPress={onBack}
+          >
+            <ArrowLeft size={18} color={P2_COLOR} />
+          </Pressable>
           <View style={styles.playerInfo}>
             <Text style={[styles.playerLabel, styles.p2Label]}>OYUNCU 2</Text>
             <View style={styles.statsRow}>
@@ -769,7 +775,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
           </Animated.View>
         )}
 
-        {/* P2 Sabotaj Butonları - playerHalf içinde, overlay kapsamında */}
+        {/* P2 Sabotaj Butonları */}
         <View style={styles.sabotageRow}>
           <SabotageButton type="shuffle" player={2} energy={p2Energy} color={P2_COLOR} />
           <SabotageButton type="blackout" player={2} energy={p2Energy} color={P2_COLOR} />

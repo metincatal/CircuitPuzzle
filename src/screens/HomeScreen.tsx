@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
   // Kartlar
   cardsContainer: {
     width: '100%',
-    maxWidth: 380,
+    maxWidth: 320,
     gap: 16,
   },
   card: {

@@ -411,6 +411,114 @@ const AnimatedTile: React.FC<{
     );
 });
 
+// ConnectionSeams: Komşu hücrelerin kablo birleşim noktalarında kısa dikiş çizgileri
+// Tek SVG'de tüm grid'i kaplayarak bağımsız tile SVG'leri arasındaki boşluğu kapatır
+const ConnectionSeams: React.FC<{
+    level: Level;
+    cellSize: number;
+    isSolved: boolean;
+    strokeScale: number;
+    blackout: boolean;
+}> = React.memo(({ level, cellSize, isSolved, strokeScale, blackout }) => {
+    if (blackout) return null;
+
+    const sw = STROKE_WIDTH * strokeScale;
+    const seamLen = cellSize * 0.12; // Dikiş yarı-uzunluğu
+    const totalWidth = cellSize * level.cols;
+    const totalHeight = cellSize * level.rows;
+
+    const cableColor = isSolved ? COLORS.solvedActive : COLORS.active;
+    const passiveColor = COLORS.passive;
+
+    // Tile'ları pozisyon haritasına dönüştür
+    const tileMap = useMemo(() => {
+        const map = new Map<string, Tile>();
+        level.tiles.forEach(t => map.set(`${t.position.row},${t.position.col}`, t));
+        return map;
+    }, [level.tiles]);
+
+    // Dikiş çizgilerini hesapla
+    const seams = useMemo(() => {
+        const result: { x1: number; y1: number; x2: number; y2: number; color: string }[] = [];
+
+        for (let row = 0; row < level.rows; row++) {
+            for (let col = 0; col < level.cols; col++) {
+                const tile = tileMap.get(`${row},${col}`);
+                if (!tile) continue;
+
+                const conns = getActiveConnections(tile);
+
+                // Sağ komşu ile yatay dikiş
+                if (col < level.cols - 1 && conns.right) {
+                    const rightTile = tileMap.get(`${row},${col + 1}`);
+                    if (rightTile) {
+                        const rightConns = getActiveConnections(rightTile);
+                        if (rightConns.left) {
+                            const x = (col + 1) * cellSize;
+                            const y = row * cellSize + cellSize / 2;
+                            // İki tile'dan birisi powered ise active renk, değilse passive
+                            const bothPowered = tile.isPowered && rightTile.isPowered;
+                            const color = bothPowered ? cableColor : passiveColor;
+                            result.push({
+                                x1: x - seamLen, y1: y,
+                                x2: x + seamLen, y2: y,
+                                color,
+                            });
+                        }
+                    }
+                }
+
+                // Alt komşu ile dikey dikiş
+                if (row < level.rows - 1 && conns.bottom) {
+                    const bottomTile = tileMap.get(`${row + 1},${col}`);
+                    if (bottomTile) {
+                        const bottomConns = getActiveConnections(bottomTile);
+                        if (bottomConns.top) {
+                            const x = col * cellSize + cellSize / 2;
+                            const y = (row + 1) * cellSize;
+                            const bothPowered = tile.isPowered && bottomTile.isPowered;
+                            const color = bothPowered ? cableColor : passiveColor;
+                            result.push({
+                                x1: x, y1: y - seamLen,
+                                x2: x, y2: y + seamLen,
+                                color,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
+    }, [level.tiles, cellSize, cableColor, passiveColor, tileMap]);
+
+    if (seams.length === 0) return null;
+
+    return (
+        <View pointerEvents="none" style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: totalWidth,
+            height: totalHeight,
+            zIndex: 10,
+        }}>
+            <Svg width={totalWidth} height={totalHeight}>
+                {seams.map((s, i) => (
+                    <Path
+                        key={`seam-${i}`}
+                        d={`M ${s.x1} ${s.y1} L ${s.x2} ${s.y2}`}
+                        stroke={s.color}
+                        strokeWidth={sw}
+                        strokeLinecap="round"
+                        fill="none"
+                    />
+                ))}
+            </Svg>
+        </View>
+    );
+});
+
 export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
     level,
     onTilePress,
@@ -452,6 +560,17 @@ export const CircuitCanvas: React.FC<CircuitCanvasProps> = ({
                     />
                 );
             })}
+
+            {/* ConnectionSeams: Kablo birleşim dikişleri */}
+            {Platform.OS === 'web' && (
+                <ConnectionSeams
+                    level={level}
+                    cellSize={cellSize}
+                    isSolved={isSolved}
+                    strokeScale={strokeScale}
+                    blackout={blackout}
+                />
+            )}
         </View>
     );
 };
