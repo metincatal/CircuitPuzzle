@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 
 const BGM_PLAYLIST = [
@@ -18,6 +19,8 @@ class SoundManager {
     static currentTrackIndex = 0;
 
     static async loadSounds() {
+        if (Platform.OS === 'web') return;
+
         await Audio.setAudioModeAsync({
             playsInSilentModeIOS: true,
             staysActiveInBackground: false,
@@ -38,6 +41,7 @@ class SoundManager {
     }
 
     static async playNextBGM() {
+        if (Platform.OS === 'web') return;
         try {
             if (this.bgmSound) {
                 await this.bgmSound.unloadAsync();
@@ -63,12 +67,14 @@ class SoundManager {
     }
 
     static async playClick() {
+        if (Platform.OS === 'web') return;
         try {
             if (this.clickSound) await this.clickSound.replayAsync();
         } catch (e) { }
     }
 
     static async playWin() {
+        if (Platform.OS === 'web') return;
         try {
             if (this.winSound) await this.winSound.replayAsync();
         } catch (e) { }

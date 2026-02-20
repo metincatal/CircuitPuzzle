@@ -5,8 +5,12 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { EyeOff, Eye, Camera, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react-native';
-import * as MediaLibrary from 'expo-media-library';
-import ViewShot from 'react-native-view-shot';
+let MediaLibrary: any = null;
+let ViewShot: any = null;
+if (Platform.OS !== 'web') {
+  MediaLibrary = require('expo-media-library');
+  ViewShot = require('react-native-view-shot').default;
+}
 
 import { CircuitCanvas, COLORS } from '../components/CircuitCanvas';
 import { MiniPreview } from '../components/MiniPreview';
@@ -153,6 +157,7 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
 
   // Screenshot
   const handleScreenshot = async () => {
+    if (Platform.OS === 'web' || !MediaLibrary) return;
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') return;
@@ -256,9 +261,21 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
 
         {/* MERKEZ ALAN */}
         <View style={styles.centerArea}>
-          <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 1 }}>
+          {Platform.OS !== 'web' && ViewShot ? (
+            <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 1 }}>
+              <View
+                collapsable={false}
+                style={{ backgroundColor: level.isSolved ? COLORS.solvedBg : COLORS.background }}
+              >
+                <CircuitCanvas
+                  level={level}
+                  onTilePress={handleTilePress}
+                  isSolved={level.isSolved}
+                />
+              </View>
+            </ViewShot>
+          ) : (
             <View
-              collapsable={false}
               style={{ backgroundColor: level.isSolved ? COLORS.solvedBg : COLORS.background }}
             >
               <CircuitCanvas
@@ -267,7 +284,7 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
                 isSolved={level.isSolved}
               />
             </View>
-          </ViewShot>
+          )}
         </View>
       </SafeAreaView>
 

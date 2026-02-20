@@ -1,12 +1,15 @@
 {
   "name": "circuitpuzzle",
+  "homepage": "https://metincatal.github.io/CircuitPuzzle",
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "expo export --platform web",
+    "deploy": "npm run build:web && gh-pages -d dist"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -18,13 +21,16 @@
     "expo-status-bar": "~3.0.9",
     "lucide-react-native": "^0.562.0",
     "react": "19.1.0",
+    "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-reanimated": "~4.1.1",
     "react-native-svg": "15.12.1",
-    "react-native-view-shot": "4.0.3"
+    "react-native-view-shot": "4.0.3",
+    "react-native-web": "^0.21.0"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "gh-pages": "^6.3.0",
     "typescript": "~5.9.2"
   },
   "private": true
