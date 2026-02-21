@@ -132,7 +132,7 @@ const computeBasePaths = (tile: Tile, cellSize: number) => {
     } else if (tile.type === 'switch') {
         isSwitch = true;
         if (tile.switchStates) {
-            const activeState = tile.switchState ? tile.switchStates.stateB : tile.switchStates.stateA;
+            const activeState = tile.switchStates.stateA;
             const activeConns = Object.entries(activeState).filter(([_, v]) => v).map(([k]) => k);
             const activeCount = activeConns.length;
 
@@ -262,7 +262,8 @@ const NativeAnimatedTile: React.FC<{
     const nr = NODE_RADIUS * strokeScale;
     const svgOverflow = sw;
 
-    const animRotation = useRef(new Animated.Value(tile.rotation * 90)).current;
+    const initialRotation = tile.type === 'switch' ? (tile.switchState ? 90 : 0) : tile.rotation * 90;
+    const animRotation = useRef(new Animated.Value(initialRotation)).current;
     const prevRotation = useRef(tile.rotation);
 
     useEffect(() => {
@@ -287,33 +288,27 @@ const NativeAnimatedTile: React.FC<{
 
     const base = useMemo(() => computeBasePaths(tile, cellSize), [
         tile.type, tile.baseConnections, tile.bridgePaths, cellSize,
-        tile.switchState, tile.switchStates, tile.diodeDirection,
+        tile.switchStates, tile.diodeDirection,
     ]);
 
-    const scaleAnim = useRef(new Animated.Value(1)).current;
     const prevSwitchState = useRef(tile.switchState);
 
     useEffect(() => {
         if (tile.type === 'switch' && tile.switchState !== prevSwitchState.current) {
+            const fromVal = prevSwitchState.current ? 90 : 0;
+            const toVal = tile.switchState ? 90 : 0;
             prevSwitchState.current = tile.switchState;
-            Animated.sequence([
-                Animated.timing(scaleAnim, {
-                    toValue: 1.1,
-                    duration: 100,
-                    easing: Easing.out(Easing.cubic),
-                    useNativeDriver: true,
-                }),
-                Animated.timing(scaleAnim, {
-                    toValue: 1,
-                    duration: 100,
-                    easing: Easing.in(Easing.cubic),
-                    useNativeDriver: true,
-                }),
-            ]).start();
+            animRotation.setValue(fromVal);
+            Animated.timing(animRotation, {
+                toValue: toVal,
+                duration: 200,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: true,
+            }).start();
         }
     }, [tile.switchState]);
 
-    const useRotation = tile.type !== 'switch' && tile.type !== 'blocker';
+    const useRotation = tile.type !== 'blocker';
 
     return (
         <Pressable
@@ -334,7 +329,7 @@ const NativeAnimatedTile: React.FC<{
                     overflow: 'visible',
                     transform: useRotation
                         ? [{ rotate: rotateStr }]
-                        : [{ scale: tile.type === 'switch' ? scaleAnim : 1 }],
+                        : [],
                 }}
             >
                 <Svg
@@ -413,7 +408,8 @@ const WebTilePaths: React.FC<{
     const oy = tile.position.row * cellSize;
 
     // === Rotation animasyonu ===
-    const animRotation = useRef(new Animated.Value(tile.rotation * 90)).current;
+    const initialRotation = tile.type === 'switch' ? (tile.switchState ? 90 : 0) : tile.rotation * 90;
+    const animRotation = useRef(new Animated.Value(initialRotation)).current;
     const prevRotation = useRef(tile.rotation);
 
     useEffect(() => {
@@ -425,41 +421,37 @@ const WebTilePaths: React.FC<{
                 toValue: target,
                 duration: 200,
                 easing: Easing.out(Easing.cubic),
-                useNativeDriver: false, // SVG prop'ları native driver desteklemez
+                useNativeDriver: false,
             }).start();
             prevRotation.current = tile.rotation;
         }
     }, [tile.rotation]);
 
-    // === Switch scale animasyonu ===
-    const scaleAnim = useRef(new Animated.Value(1)).current;
+    // === Switch rotation animasyonu ===
     const prevSwitchState = useRef(tile.switchState);
 
     useEffect(() => {
         if (tile.type === 'switch' && tile.switchState !== prevSwitchState.current) {
+            const fromVal = prevSwitchState.current ? 90 : 0;
+            const toVal = tile.switchState ? 90 : 0;
             prevSwitchState.current = tile.switchState;
-            Animated.sequence([
-                Animated.timing(scaleAnim, {
-                    toValue: 1.1, duration: 100,
-                    easing: Easing.out(Easing.cubic),
-                    useNativeDriver: false,
-                }),
-                Animated.timing(scaleAnim, {
-                    toValue: 1, duration: 100,
-                    easing: Easing.in(Easing.cubic),
-                    useNativeDriver: false,
-                }),
-            ]).start();
+            animRotation.setValue(fromVal);
+            Animated.timing(animRotation, {
+                toValue: toVal,
+                duration: 200,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: false,
+            }).start();
         }
     }, [tile.switchState]);
 
     // === Base path'leri hesapla ===
     const base = useMemo(() => computeBasePaths(tile, cellSize), [
         tile.type, tile.baseConnections, tile.bridgePaths, cellSize,
-        tile.switchState, tile.switchStates, tile.diodeDirection,
+        tile.switchStates, tile.diodeDirection,
     ]);
 
-    const useRotation = tile.type !== 'switch' && tile.type !== 'blocker';
+    const useRotation = tile.type !== 'blocker';
 
     // G grubu: tile'ın hücresel ofsetine konumlanır, merkezinden döner
     return (
@@ -469,7 +461,6 @@ const WebTilePaths: React.FC<{
             rotation={useRotation ? animRotation : 0}
             originX={half}
             originY={half}
-            scale={tile.type === 'switch' ? scaleAnim : 1}
         >
             {/* Kablo path'leri */}
             {!blackout && base.paths.map((d, i) => (
