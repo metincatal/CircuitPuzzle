@@ -16,6 +16,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [lastClassicLevel, setLastClassicLevel] = useState(1);
   const [speedHighScore, setSpeedHighScore] = useState(0);
+  const [speedBestWave, setSpeedBestWave] = useState(0);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
@@ -28,6 +29,8 @@ export default function App() {
 
       const hs = await StorageManager.getSpeedHighScore();
       setSpeedHighScore(hs);
+      const bw = await StorageManager.getSpeedBestWave();
+      setSpeedBestWave(bw);
 
       setIsReady(true);
     };
@@ -41,6 +44,8 @@ export default function App() {
 
     const hs = await StorageManager.getSpeedHighScore();
     setSpeedHighScore(hs);
+    const bw = await StorageManager.getSpeedBestWave();
+    setSpeedBestWave(bw);
 
     setScreen('home');
   };
@@ -60,6 +65,7 @@ export default function App() {
           onSelectMode={(mode) => setScreen(mode)}
           lastClassicLevel={lastClassicLevel}
           speedHighScore={speedHighScore}
+          speedBestWave={speedBestWave}
         />
       );
     case 'classic':

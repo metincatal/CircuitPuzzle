@@ -35,6 +35,7 @@ const STORAGE_KEYS = {
     LEVEL_RECORDS: '@circuit_level_records',
     GAME_STATS: '@circuit_game_stats',
     SPEED_HIGH_SCORE: '@circuit_speed_high_score',
+    SPEED_BEST_WAVE: '@circuit_speed_best_wave',
     LAST_CLASSIC_LEVEL: '@circuit_last_classic_level',
     DUEL_STATS: '@circuit_duel_stats',
 };
@@ -219,6 +220,31 @@ class StorageManager {
     static async getSpeedHighScore(): Promise<number> {
         try {
             const val = await AsyncStorage.getItem(STORAGE_KEYS.SPEED_HIGH_SCORE);
+            return val ? parseInt(val, 10) : 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+
+    /**
+     * Speed mode en iyi dalga kaydı
+     */
+    static async saveSpeedBestWave(wave: number): Promise<boolean> {
+        try {
+            const current = await this.getSpeedBestWave();
+            if (wave > current) {
+                await AsyncStorage.setItem(STORAGE_KEYS.SPEED_BEST_WAVE, wave.toString());
+                return true;
+            }
+            return false;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    static async getSpeedBestWave(): Promise<number> {
+        try {
+            const val = await AsyncStorage.getItem(STORAGE_KEYS.SPEED_BEST_WAVE);
             return val ? parseInt(val, 10) : 0;
         } catch (error) {
             return 0;

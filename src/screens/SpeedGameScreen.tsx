@@ -17,233 +17,237 @@ import {
   isLevelSolved,
 } from '../types/circuit';
 
-const INITIAL_TIME = 60; // saniye
+// ─── Sabitler ────────────────────────────────────────────────
 
-// Speed puzzle numarasını klasik seviye numarasına çevir
-// Progresif zorluk: hızlı artan, sınırsız
-const speedToClassicLevel = (puzzleNum: number): number => {
-  if (puzzleNum <= 3) return puzzleNum + 1;                    // Isınma: 2, 3, 4 → 5×4
-  if (puzzleNum <= 6) return puzzleNum * 3;                    // Kolay: 9, 12, 15, 18 → 5×5, 6×5
-  if (puzzleNum <= 10) return 18 + (puzzleNum - 6) * 5;       // Orta: 23, 28, 33, 38 → 7×6
-  if (puzzleNum <= 15) return 38 + (puzzleNum - 10) * 7;      // Zor: 45, 52, 59, 66, 73 → 8×7
-  return 73 + (puzzleNum - 15) * 10;                           // Çok zor: 83, 93, 103... → 9×8+
+const INITIAL_TIME = 60;
+const PUZZLES_PER_WAVE = 3;
+const WAVE_BONUS_TIME = 5;
+const CESUR_LEVEL_BOOST = 8;
+const MAX_TIME = 120;
+
+type GamePhase = 'countdown' | 'playing' | 'waveComplete' | 'gameOver';
+
+// ─── Dalga → Klasik seviye eşlemesi ─────────────────────────
+
+const WAVE_LEVELS = [2, 5, 9, 14, 20, 27, 35, 44, 55, 67];
+
+const getWaveBaseLevel = (wave: number): number => {
+  if (wave <= WAVE_LEVELS.length) return WAVE_LEVELS[wave - 1];
+  return WAVE_LEVELS[WAVE_LEVELS.length - 1] + (wave - WAVE_LEVELS.length) * 13;
 };
 
-const COMBO_TIME_LIMIT = 15; // saniye - bu sürede çöz, combo devam etsin
+// ─── Zaman bonusu (grid boyutuna göre) ──────────────────────
 
-// Grid boyutuna göre zaman bonusu
 const getTimeBonus = (rows: number, cols: number): number => {
   const tileCount = rows * cols;
-  if (tileCount <= 20) return 10;  // 5x4
-  if (tileCount <= 30) return 14;  // 6x5
-  if (tileCount <= 42) return 18;  // 7x6
-  if (tileCount <= 56) return 22;  // 7x7, 8x7
-  return 25;                        // 8x8+
+  if (tileCount <= 20) return 10;
+  if (tileCount <= 30) return 14;
+  if (tileCount <= 42) return 18;
+  if (tileCount <= 56) return 22;
+  return 25;
 };
+
+// ─── Combo süre limiti (grid boyutuna göre ölçekleniyor) ────
+
+const getComboTimeLimit = (rows: number, cols: number): number => {
+  const tileCount = rows * cols;
+  if (tileCount <= 20) return 12;
+  if (tileCount <= 30) return 18;
+  if (tileCount <= 42) return 25;
+  if (tileCount <= 56) return 35;
+  return 45;
+};
+
+// ─── Puan hesaplama ─────────────────────────────────────────
+
+const calculatePuzzleScore = (
+  wave: number,
+  isCesur: boolean,
+  solveTimeSec: number,
+  combo: number,
+): number => {
+  const base = 100;
+  const waveMult = 1 + (wave - 1) * 0.15;
+  const cesurMult = isCesur ? 2 : 1;
+  const comboMult = combo >= 4 ? 2.0 : combo >= 3 ? 1.5 : combo >= 2 ? 1.2 : 1.0;
+  const speedBonus = Math.max(0, 50 - Math.floor(solveTimeSec * 2));
+  return Math.round(base * waveMult * cesurMult * comboMult + speedBonus);
+};
+
+// ─── Milestone ──────────────────────────────────────────────
+
+type Milestone = 'Bronz' | 'Gümüş' | 'Altın' | 'Elmas';
+
+const getMilestone = (wave: number): Milestone | null => {
+  if (wave >= 12) return 'Elmas';
+  if (wave >= 8) return 'Altın';
+  if (wave >= 5) return 'Gümüş';
+  if (wave >= 3) return 'Bronz';
+  return null;
+};
+
+const MILESTONE_COLORS: Record<Milestone, string> = {
+  Bronz: '#A0724E',
+  Gümüş: '#8A8A8A',
+  Altın: '#C19A3A',
+  Elmas: '#5A8FC1',
+};
+
+// ─── Skor formatlama ────────────────────────────────────────
+
+const formatScore = (s: number): string =>
+  s.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+// ─── Bileşen ────────────────────────────────────────────────
 
 interface SpeedGameScreenProps {
   onBack: () => void;
 }
 
 export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
+  // Durum
+  const [phase, setPhase] = useState<GamePhase>('countdown');
+  const [countdown, setCountdown] = useState(3);
+  const [wave, setWave] = useState(1);
+  const [puzzleInWave, setPuzzleInWave] = useState(0);
   const [level, setLevel] = useState<Level | null>(null);
-  const [puzzleNumber, setPuzzleNumber] = useState(0);
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(INITIAL_TIME);
-  const [isGameOver, setIsGameOver] = useState(false);
+  const [combo, setCombo] = useState(0);
+  const [isCesurWave, setIsCesurWave] = useState(false);
   const [isNewRecord, setIsNewRecord] = useState(false);
   const [highScore, setHighScore] = useState(0);
-  const [isStarting, setIsStarting] = useState(true);
-  const [countdown, setCountdown] = useState(3);
+  const [bestWave, setBestWave] = useState(0);
 
-  // Zaman bonusu animasyonu
+  // Animasyonlar
+  const timerBarWidth = useRef(new Animated.Value(1)).current;
+  const timerPulse = useRef(new Animated.Value(1)).current;
   const bonusOpacity = useRef(new Animated.Value(0)).current;
   const bonusTranslateY = useRef(new Animated.Value(0)).current;
   const [bonusText, setBonusText] = useState('');
-
-  // Timer bar animasyonu
-  const timerBarWidth = useRef(new Animated.Value(1)).current;
-  const timerPulse = useRef(new Animated.Value(1)).current;
-
-  // Çözüm flash animasyonu
   const solveFlash = useRef(new Animated.Value(0)).current;
-
-  // Score animasyonu
   const scoreScale = useRef(new Animated.Value(1)).current;
-
-  // Combo sistemi
-  const [combo, setCombo] = useState(0);
-  const comboRef = useRef(0);
-  const puzzleStartTimeRef = useRef(0);
   const comboScale = useRef(new Animated.Value(0)).current;
+  const waveCompleteAnim = useRef(new Animated.Value(0)).current;
 
-  // Ref'ler (closure sorunlarını önlemek için)
+  // Ref'ler (closure güvenliği)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const phaseRef = useRef<GamePhase>('countdown');
   const timeLeftRef = useRef(INITIAL_TIME);
-  const isGameOverRef = useRef(false);
-  const isStartingRef = useRef(true);
   const scoreRef = useRef(0);
-  const puzzleNumberRef = useRef(0);
+  const waveRef = useRef(1);
+  const puzzleInWaveRef = useRef(0);
+  const comboRef = useRef(0);
   const levelRef = useRef<Level | null>(null);
+  const isCesurWaveRef = useRef(false);
+  const puzzleStartTimeRef = useRef(0);
 
-  // Yükleme
+  // ─── Başlatma ───────────────────────────────────────────
+
   useEffect(() => {
     const init = async () => {
       const hs = await StorageManager.getSpeedHighScore();
       setHighScore(hs);
+      const bw = await StorageManager.getSpeedBestWave();
+      setBestWave(bw);
     };
     init();
   }, []);
 
-  // Geri sayım
-  useEffect(() => {
-    if (!isStarting) return;
+  // ─── Geri sayım ────────────────────────────────────────
 
-    const countdownInterval = setInterval(() => {
+  useEffect(() => {
+    if (phase !== 'countdown') return;
+    const interval = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          clearInterval(countdownInterval);
-          setIsStarting(false);
-          isStartingRef.current = false;
+          clearInterval(interval);
           startGame();
           return 0;
         }
         return prev - 1;
       });
     }, 800);
+    return () => clearInterval(interval);
+  }, [phase]);
 
-    return () => clearInterval(countdownInterval);
-  }, [isStarting]);
+  // ─── Temizlik ──────────────────────────────────────────
 
-  const startGame = () => {
-    setScore(0);
-    setTimeLeft(INITIAL_TIME);
-    timeLeftRef.current = INITIAL_TIME;
-    setIsGameOver(false);
-    isGameOverRef.current = false;
-    setPuzzleNumber(0);
-    timerBarWidth.setValue(1);
-
-    // İlk bulmacayı oluştur
-    loadNextPuzzle(1);
-
-    // Timer başlat
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      if (isGameOverRef.current || isStartingRef.current) return;
-
-      timeLeftRef.current -= 0.1;
-      const newTime = Math.max(0, timeLeftRef.current);
-
-      setTimeLeft(newTime);
-
-      // Timer bar güncelle
-      timerBarWidth.setValue(newTime / INITIAL_TIME);
-
-      if (newTime <= 0) {
-        gameOver();
-      }
-    }, 100);
-  };
-
-  const loadNextPuzzle = (nextPuzzleNum: number) => {
-    const classicLevel = speedToClassicLevel(nextPuzzleNum);
-    const newLevel = generateGridLevel(classicLevel);
-    setLevel(newLevel);
-    levelRef.current = newLevel;
-    setPuzzleNumber(nextPuzzleNum);
-    puzzleNumberRef.current = nextPuzzleNum;
-    puzzleStartTimeRef.current = Date.now();
-  };
-
-  const gameOver = async () => {
-    if (isGameOverRef.current) return;
-    isGameOverRef.current = true;
-    setIsGameOver(true);
-
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    HapticManager.mediumTap();
-
-    // Rekor kontrol (ref kullan, stale closure önleme)
-    const currentScore = scoreRef.current;
-    const isNew = await StorageManager.saveSpeedHighScore(currentScore);
-    if (isNew) {
-      setIsNewRecord(true);
-    }
-    const hs = await StorageManager.getSpeedHighScore();
-    setHighScore(hs);
-  };
-
-  // Cleanup
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
 
-  // Düşük süre pulse efekti
+  // ─── Düşük süre nabız efekti ──────────────────────────
+
   useEffect(() => {
-    if (timeLeft <= 10 && timeLeft > 0 && !isGameOver && !isStarting) {
+    if (timeLeft <= 10 && timeLeft > 0 && phase === 'playing') {
       Animated.sequence([
         Animated.timing(timerPulse, {
-          toValue: 1.1,
-          duration: 200,
-          useNativeDriver: true,
+          toValue: 1.1, duration: 200, useNativeDriver: true,
         }),
         Animated.timing(timerPulse, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
+          toValue: 1, duration: 200, useNativeDriver: true,
         }),
       ]).start();
     }
   }, [Math.floor(timeLeft)]);
 
-  const showTimeBonus = (bonus: number) => {
-    setBonusText(`+${bonus}s`);
-    bonusOpacity.setValue(1);
-    bonusTranslateY.setValue(0);
+  // ─── Oyun başlat ──────────────────────────────────────
 
-    Animated.parallel([
-      Animated.timing(bonusOpacity, {
-        toValue: 0,
-        duration: 1200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(bonusTranslateY, {
-        toValue: -50,
-        duration: 1200,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start();
+  const startGame = () => {
+    phaseRef.current = 'playing';
+    setPhase('playing');
+    scoreRef.current = 0;
+    setScore(0);
+    waveRef.current = 1;
+    setWave(1);
+    puzzleInWaveRef.current = 0;
+    setPuzzleInWave(0);
+    timeLeftRef.current = INITIAL_TIME;
+    setTimeLeft(INITIAL_TIME);
+    comboRef.current = 0;
+    setCombo(0);
+    isCesurWaveRef.current = false;
+    setIsCesurWave(false);
+    timerBarWidth.setValue(1);
+
+    loadPuzzle(1, false);
+    startTimer();
   };
 
-  const showSolveFlash = () => {
-    solveFlash.setValue(1);
-    Animated.timing(solveFlash, {
-      toValue: 0,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
+  const startTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      if (phaseRef.current !== 'playing') return;
+
+      timeLeftRef.current -= 0.1;
+      const t = Math.max(0, timeLeftRef.current);
+      setTimeLeft(t);
+      timerBarWidth.setValue(Math.min(t / INITIAL_TIME, 1));
+
+      if (t <= 0) gameOver();
+    }, 100);
   };
 
-  const showScorePop = () => {
-    scoreScale.setValue(1.3);
-    Animated.spring(scoreScale, {
-      toValue: 1,
-      friction: 4,
-      useNativeDriver: true,
-    }).start();
+  // ─── Puzzle yükleme ───────────────────────────────────
+
+  const loadPuzzle = (waveNum: number, cesur: boolean) => {
+    const baseLevel = getWaveBaseLevel(waveNum);
+    const actualLevel = cesur ? baseLevel + CESUR_LEVEL_BOOST : baseLevel;
+    const newLevel = generateGridLevel(actualLevel);
+    setLevel(newLevel);
+    levelRef.current = newLevel;
+    puzzleStartTimeRef.current = Date.now();
   };
+
+  // ─── Tile tıklama ─────────────────────────────────────
 
   const handleTilePress = useCallback((tileId: string) => {
     const currentLevel = levelRef.current;
-    if (!currentLevel || currentLevel.isSolved || isGameOverRef.current || isStartingRef.current) return;
+    if (!currentLevel || currentLevel.isSolved) return;
+    if (phaseRef.current !== 'playing') return;
 
     const tile = currentLevel.tiles.find(t => t.id === tileId);
     if (tile?.fixed) return;
@@ -263,7 +267,6 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
       const solved = isLevelSolved(newTiles);
 
       if (solved) {
-        // Bulmaca çözüldü!
         handlePuzzleSolved(prevLevel.rows, prevLevel.cols);
       }
 
@@ -273,24 +276,16 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
     });
   }, []);
 
-  const showComboIndicator = (comboCount: number) => {
-    if (comboCount >= 2) {
-      comboScale.setValue(1.4);
-      Animated.spring(comboScale, {
-        toValue: 1,
-        friction: 4,
-        useNativeDriver: true,
-      }).start();
-    }
-  };
+  // ─── Puzzle çözüldü ───────────────────────────────────
 
   const handlePuzzleSolved = (rows: number, cols: number) => {
     SoundManager.playWin();
     HapticManager.celebrationBurst();
 
-    // Combo kontrolü: hızlı çözdün mü?
+    // Combo
     const solveTime = (Date.now() - puzzleStartTimeRef.current) / 1000;
-    if (solveTime <= COMBO_TIME_LIMIT && comboRef.current >= 0) {
+    const comboLimit = getComboTimeLimit(rows, cols);
+    if (solveTime <= comboLimit) {
       comboRef.current += 1;
     } else {
       comboRef.current = 0;
@@ -298,44 +293,114 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
     setCombo(comboRef.current);
     showComboIndicator(comboRef.current);
 
-    // Skor artır
-    const newScore = scoreRef.current + 1;
-    scoreRef.current = newScore;
-    setScore(newScore);
+    // Skor
+    const points = calculatePuzzleScore(
+      waveRef.current, isCesurWaveRef.current, solveTime, comboRef.current,
+    );
+    scoreRef.current += points;
+    setScore(scoreRef.current);
     showScorePop();
     showSolveFlash();
 
-    // Zaman bonusu: combo ile artan
+    // Zaman bonusu
     const baseBonus = getTimeBonus(rows, cols);
-    const comboBonus = Math.min(comboRef.current, 5) * 2; // max +10s ekstra
-    const totalBonus = baseBonus + comboBonus;
-    timeLeftRef.current = Math.min(timeLeftRef.current + totalBonus, 99.9);
+    const comboBonus = Math.min(comboRef.current, 5) * 2;
+    const cesurPenalty = isCesurWaveRef.current ? 0.6 : 1;
+    const totalBonus = Math.round((baseBonus + comboBonus) * cesurPenalty);
+    timeLeftRef.current = Math.min(timeLeftRef.current + totalBonus, MAX_TIME);
     setTimeLeft(timeLeftRef.current);
-    timerBarWidth.setValue(timeLeftRef.current / INITIAL_TIME);
+    timerBarWidth.setValue(Math.min(timeLeftRef.current / INITIAL_TIME, 1));
     showTimeBonus(totalBonus);
 
-    // Kısa gecikme sonra sonraki bulmaca
-    const nextPuzzle = puzzleNumberRef.current + 1;
-    setTimeout(() => {
-      loadNextPuzzle(nextPuzzle);
-    }, 600);
+    // Dalga ilerleme
+    const nextPuzzleInWave = puzzleInWaveRef.current + 1;
+
+    if (nextPuzzleInWave >= PUZZLES_PER_WAVE) {
+      // Dalga tamamlandı — dalga bonus zamanı ekle
+      timeLeftRef.current = Math.min(timeLeftRef.current + WAVE_BONUS_TIME, MAX_TIME);
+      setTimeLeft(timeLeftRef.current);
+
+      setTimeout(() => {
+        phaseRef.current = 'waveComplete';
+        setPhase('waveComplete');
+        waveCompleteAnim.setValue(0);
+        Animated.timing(waveCompleteAnim, {
+          toValue: 1, duration: 300, useNativeDriver: true,
+        }).start();
+      }, 700);
+    } else {
+      puzzleInWaveRef.current = nextPuzzleInWave;
+      setPuzzleInWave(nextPuzzleInWave);
+
+      setTimeout(() => {
+        loadPuzzle(waveRef.current, isCesurWaveRef.current);
+      }, 600);
+    }
   };
+
+  // ─── Dalga seçimi ─────────────────────────────────────
+
+  const handleWaveChoice = (cesur: boolean) => {
+    const nextWave = waveRef.current + 1;
+    waveRef.current = nextWave;
+    setWave(nextWave);
+    puzzleInWaveRef.current = 0;
+    setPuzzleInWave(0);
+    isCesurWaveRef.current = cesur;
+    setIsCesurWave(cesur);
+
+    phaseRef.current = 'playing';
+    setPhase('playing');
+
+    loadPuzzle(nextWave, cesur);
+  };
+
+  // ─── Oyun bitti ───────────────────────────────────────
+
+  const gameOver = async () => {
+    if (phaseRef.current === 'gameOver') return;
+    phaseRef.current = 'gameOver';
+    setPhase('gameOver');
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    HapticManager.mediumTap();
+
+    const currentScore = scoreRef.current;
+    const currentWave = waveRef.current;
+
+    const isNew = await StorageManager.saveSpeedHighScore(currentScore);
+    if (isNew) setIsNewRecord(true);
+    await StorageManager.saveSpeedBestWave(currentWave);
+
+    const hs = await StorageManager.getSpeedHighScore();
+    setHighScore(hs);
+    const bw = await StorageManager.getSpeedBestWave();
+    setBestWave(bw);
+  };
+
+  // ─── Tekrar oyna ──────────────────────────────────────
 
   const handlePlayAgain = () => {
     setIsNewRecord(false);
-    setIsGameOver(false);
-    isGameOverRef.current = false;
-    setIsStarting(true);
-    isStartingRef.current = true;
+    phaseRef.current = 'countdown';
+    setPhase('countdown');
     setCountdown(3);
-    setScore(0);
     scoreRef.current = 0;
-    setPuzzleNumber(0);
-    puzzleNumberRef.current = 0;
-    setCombo(0);
+    setScore(0);
+    waveRef.current = 1;
+    setWave(1);
+    puzzleInWaveRef.current = 0;
+    setPuzzleInWave(0);
     comboRef.current = 0;
-    setTimeLeft(INITIAL_TIME);
+    setCombo(0);
+    isCesurWaveRef.current = false;
+    setIsCesurWave(false);
     timeLeftRef.current = INITIAL_TIME;
+    setTimeLeft(INITIAL_TIME);
     timerBarWidth.setValue(1);
     levelRef.current = null;
   };
@@ -348,22 +413,65 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
     onBack();
   };
 
-  // Timer rengi
+  // ─── Animasyon yardımcıları ───────────────────────────
+
+  const showTimeBonus = (bonus: number) => {
+    setBonusText(`+${bonus}s`);
+    bonusOpacity.setValue(1);
+    bonusTranslateY.setValue(0);
+    Animated.parallel([
+      Animated.timing(bonusOpacity, {
+        toValue: 0, duration: 1200, useNativeDriver: true,
+      }),
+      Animated.timing(bonusTranslateY, {
+        toValue: -50, duration: 1200,
+        easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const showSolveFlash = () => {
+    solveFlash.setValue(1);
+    Animated.timing(solveFlash, {
+      toValue: 0, duration: 400, useNativeDriver: true,
+    }).start();
+  };
+
+  const showScorePop = () => {
+    scoreScale.setValue(1.3);
+    Animated.spring(scoreScale, {
+      toValue: 1, friction: 4, useNativeDriver: true,
+    }).start();
+  };
+
+  const showComboIndicator = (c: number) => {
+    if (c >= 2) {
+      comboScale.setValue(1.4);
+      Animated.spring(comboScale, {
+        toValue: 1, friction: 4, useNativeDriver: true,
+      }).start();
+    }
+  };
+
+  // ─── Yardımcı render ──────────────────────────────────
+
   const getTimerColor = () => {
     if (timeLeft > 30) return COLORS.active;
     if (timeLeft > 10) return '#B8A634';
     return '#B84634';
   };
 
-  // Süre formatla
   const formatTime = (t: number): string => {
     const secs = Math.floor(t);
     const tenths = Math.floor((t % 1) * 10);
     return `${secs}.${tenths}`;
   };
 
-  // Geri sayım ekranı
-  if (isStarting) {
+  const milestone = getMilestone(wave);
+
+  // ─── Geri sayım ekranı ────────────────────────────────
+
+  if (phase === 'countdown') {
     return (
       <View style={styles.container}>
         <StatusBar style="dark" />
@@ -388,6 +496,26 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
   }
 
   const timerColor = getTimerColor();
+
+  // ─── Dalga ilerleme noktaları ─────────────────────────
+
+  const renderWaveDots = () => {
+    const dots = [];
+    for (let i = 0; i < PUZZLES_PER_WAVE; i++) {
+      const filled = i < puzzleInWave || (level.isSolved && i === puzzleInWave);
+      dots.push(
+        <View
+          key={i}
+          style={[
+            styles.waveDot,
+            filled ? styles.waveDotFilled : styles.waveDotEmpty,
+            isCesurWave && filled && styles.waveDotCesur,
+          ]}
+        />,
+      );
+    }
+    return dots;
+  };
 
   return (
     <View style={styles.container}>
@@ -420,12 +548,12 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
           </Pressable>
 
           <Animated.View style={[styles.scoreContainer, { transform: [{ scale: scoreScale }] }]}>
-            <Text style={styles.scoreLabel}>SKOR</Text>
-            <Text style={styles.scoreText}>{score}</Text>
+            <Text style={styles.scoreText}>{formatScore(score)}</Text>
           </Animated.View>
 
-          <View style={styles.puzzleNumContainer}>
-            <Text style={styles.puzzleNumText}>#{puzzleNumber}</Text>
+          <View style={styles.waveInfo}>
+            <Text style={styles.waveText}>D.{wave}</Text>
+            <View style={styles.waveDotsRow}>{renderWaveDots()}</View>
           </View>
         </View>
 
@@ -449,7 +577,6 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
             {formatTime(timeLeft)}
           </Text>
 
-          {/* Zaman bonusu animasyonu */}
           <Animated.Text
             style={[
               styles.bonusText,
@@ -463,19 +590,25 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
           </Animated.Text>
         </Animated.View>
 
-        {/* COMBO GÖSTERGESI */}
+        {/* COMBO */}
         {combo >= 2 && (
           <Animated.View style={[
             styles.comboContainer,
             { transform: [{ scale: comboScale }] },
           ]}>
             <Zap size={14} color="#C17A3A" />
-            <Text style={styles.comboText}>x{combo} COMBO</Text>
-            <Text style={styles.comboBonusHint}>+{Math.min(combo, 5) * 2}s bonus</Text>
+            <Text style={styles.comboText}>x{combo}</Text>
           </Animated.View>
         )}
 
-        {/* PUZZLE ALANI */}
+        {/* CESUR göstergesi */}
+        {isCesurWave && phase === 'playing' && (
+          <View style={styles.cesurBadge}>
+            <Text style={styles.cesurBadgeText}>CESUR ×2</Text>
+          </View>
+        )}
+
+        {/* PUZZLE */}
         <View style={styles.centerArea}>
           <CircuitCanvas
             level={level}
@@ -485,12 +618,47 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
         </View>
       </SafeAreaView>
 
-      {/* GAME OVER MODAL */}
-      <Modal
-        visible={isGameOver}
-        transparent
-        animationType="fade"
-      >
+      {/* ─── DALGA TAMAMLANDI OVERLAY ──────────────────── */}
+      {phase === 'waveComplete' && (
+        <Animated.View
+          style={[
+            styles.waveOverlay,
+            { opacity: waveCompleteAnim },
+          ]}
+        >
+          <View style={styles.waveOverlayContent}>
+            <Text style={styles.waveCompleteTitle}>DALGA {wave}</Text>
+            <View style={styles.waveCompleteLine} />
+
+            <View style={styles.waveChoiceRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.waveChoiceBtn,
+                  styles.waveChoiceNormal,
+                  pressed && styles.btnPressed,
+                ]}
+                onPress={() => handleWaveChoice(false)}
+              >
+                <Text style={styles.waveChoiceLabel}>Devam</Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.waveChoiceBtn,
+                  styles.waveChoiceCesur,
+                  pressed && styles.btnPressed,
+                ]}
+                onPress={() => handleWaveChoice(true)}
+              >
+                <Text style={styles.waveChoiceCesurLabel}>Cesur ×2</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Animated.View>
+      )}
+
+      {/* ─── GAME OVER MODAL ──────────────────────────── */}
+      <Modal visible={phase === 'gameOver'} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             {isNewRecord && (
@@ -500,18 +668,33 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
               </View>
             )}
 
+            {milestone && (
+              <Text style={[
+                styles.milestoneText,
+                { color: MILESTONE_COLORS[milestone] },
+              ]}>
+                {milestone}
+              </Text>
+            )}
+
             <Text style={styles.gameOverTitle}>Süre Doldu!</Text>
 
             <View style={styles.statsContainer}>
               <View style={styles.statRow}>
-                <Text style={styles.statLabel}>Çözülen</Text>
-                <Text style={styles.statValue}>{score}</Text>
+                <Text style={styles.statLabel}>Skor</Text>
+                <Text style={styles.statValue}>{formatScore(score)}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statRow}>
-                <Text style={styles.statLabel}>En İyi</Text>
-                <Text style={styles.statValue}>{highScore}</Text>
+                <Text style={styles.statLabel}>Dalga</Text>
+                <Text style={styles.statValue}>{wave}</Text>
               </View>
+            </View>
+
+            <View style={styles.bestStatsContainer}>
+              <Text style={styles.bestStatText}>
+                En iyi: {formatScore(highScore)} • Dalga {bestWave}
+              </Text>
             </View>
 
             <View style={styles.modalButtons}>
@@ -545,6 +728,8 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
   );
 };
 
+// ─── Stiller ─────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -554,6 +739,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
+
   // Geri sayım
   countdownContainer: {
     flex: 1,
@@ -573,6 +759,7 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     textTransform: 'uppercase',
   },
+
   // Header
   header: {
     flexDirection: 'row',
@@ -597,28 +784,42 @@ const styles = StyleSheet.create({
   scoreContainer: {
     alignItems: 'center',
   },
-  scoreLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: 'rgba(107,123,58,0.4)',
-    letterSpacing: 2,
-  },
   scoreText: {
     fontSize: 28,
     fontWeight: '700',
     color: COLORS.active,
     fontVariant: ['tabular-nums'],
   },
-  puzzleNumContainer: {
-    width: 40,
+  waveInfo: {
     alignItems: 'flex-end',
+    minWidth: 50,
   },
-  puzzleNumText: {
+  waveText: {
     fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(107,123,58,0.3)',
+    fontWeight: '700',
+    color: 'rgba(193,122,58,0.7)',
     fontVariant: ['tabular-nums'],
   },
+  waveDotsRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 4,
+  },
+  waveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  waveDotFilled: {
+    backgroundColor: 'rgba(107,123,58,0.6)',
+  },
+  waveDotEmpty: {
+    backgroundColor: 'rgba(107,123,58,0.15)',
+  },
+  waveDotCesur: {
+    backgroundColor: 'rgba(193,122,58,0.7)',
+  },
+
   // Timer
   timerContainer: {
     width: '100%',
@@ -655,33 +856,103 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.solvedActive,
   },
+
   // Combo
   comboContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 4,
+    gap: 4,
+    paddingVertical: 2,
   },
   comboText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     color: '#C17A3A',
     letterSpacing: 1,
   },
-  comboBonusHint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(193,122,58,0.5)',
+
+  // Cesur badge
+  cesurBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(193,122,58,0.12)',
   },
-  // Center
+  cesurBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#C17A3A',
+    letterSpacing: 1,
+  },
+
+  // Puzzle alanı
   centerArea: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'visible',
   },
-  // Game Over Modal
+
+  // ─── Dalga tamamlandı overlay ──────────────────────────
+  waveOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+    paddingHorizontal: 32,
+  },
+  waveOverlayContent: {
+    backgroundColor: COLORS.background,
+    borderRadius: 24,
+    padding: 32,
+    width: '100%',
+    maxWidth: 300,
+    alignItems: 'center',
+  },
+  waveCompleteTitle: {
+    fontSize: 24,
+    fontWeight: '300',
+    color: '#C17A3A',
+    letterSpacing: 3,
+  },
+  waveCompleteLine: {
+    width: 40,
+    height: 2,
+    backgroundColor: 'rgba(193,122,58,0.25)',
+    marginVertical: 20,
+  },
+  waveChoiceRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  waveChoiceBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  waveChoiceNormal: {
+    backgroundColor: 'rgba(107,123,58,0.1)',
+  },
+  waveChoiceLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.active,
+  },
+  waveChoiceCesur: {
+    backgroundColor: '#C17A3A',
+  },
+  waveChoiceCesurLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // ─── Game Over Modal ──────────────────────────────────
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -705,13 +976,20 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     gap: 6,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   newRecordText: {
     fontSize: 13,
     fontWeight: '800',
     color: '#C17A3A',
     letterSpacing: 1,
+  },
+  milestoneText: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 8,
   },
   gameOverTitle: {
     fontSize: 28,
@@ -722,7 +1000,7 @@ const styles = StyleSheet.create({
   statsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 12,
     gap: 24,
   },
   statRow: {
@@ -737,7 +1015,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statValue: {
-    fontSize: 36,
+    fontSize: 32,
     fontWeight: '700',
     color: COLORS.active,
     fontVariant: ['tabular-nums'],
@@ -746,6 +1024,14 @@ const styles = StyleSheet.create({
     width: 1,
     height: 40,
     backgroundColor: 'rgba(107,123,58,0.15)',
+  },
+  bestStatsContainer: {
+    marginBottom: 24,
+  },
+  bestStatText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(107,123,58,0.4)',
   },
   modalButtons: {
     width: '100%',

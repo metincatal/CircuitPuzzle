@@ -13,12 +13,17 @@ interface HomeScreenProps {
   onSelectMode: (mode: 'classic' | 'speed' | 'duel') => void;
   lastClassicLevel: number;
   speedHighScore: number;
+  speedBestWave: number;
 }
+
+const formatScore = (s: number): string =>
+  s.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onSelectMode,
   lastClassicLevel,
   speedHighScore,
+  speedBestWave,
 }) => {
   const titleOpacity = useRef(new Animated.Value(0)).current;
   const titleTranslateY = useRef(new Animated.Value(-20)).current;
@@ -171,13 +176,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <ChevronRight size={20} color="rgba(193,122,58,0.4)" style={styles.cardArrow} />
               </View>
               <Text style={[styles.cardDescription, styles.speedCardDescription]}>
-                60 saniye, sonsuz bulmaca.{'\n'}
-                Her çözüm süre kazandırır!
+                Dalga dalga artan zorluk.{'\n'}
+                Cesur ol, risk al!
               </Text>
-              {speedHighScore > 0 && (
+              {speedBestWave > 0 && (
                 <View style={[styles.cardFooter, styles.speedCardFooter]}>
                   <Text style={[styles.cardFooterText, styles.speedFooterText]}>
-                    En İyi: {speedHighScore} bulmaca
+                    Dalga {speedBestWave} — {formatScore(speedHighScore)}
                   </Text>
                 </View>
               )}
