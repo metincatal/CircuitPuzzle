@@ -126,7 +126,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
   const canvasMaxHeight = flexHeight - STATUS_BAR_HEIGHT - miniBarHeight - sabotageRowHeight - 4;
 
   const getCellSize = (level: Level) => {
-    const canvasWidth = SCREEN_WIDTH - 16;
+    const canvasWidth = SCREEN_WIDTH - 20;
     const cellW = canvasWidth / level.cols;
     const cellH = canvasMaxHeight / level.rows;
     return Math.min(cellW, cellH);
@@ -390,8 +390,9 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     });
   }, []);
 
-  // ======== TOUCH HANDLER ========
+  // ======== TOUCH HANDLER (Native only — web uses CircuitCanvas's own Pressable overlays) ========
   const handleRootTouch = useCallback((e: GestureResponderEvent) => {
+    if (Platform.OS === 'web') return;
     if (gamePhaseRef.current !== 'playing') return;
 
     const nativeEvent = e.nativeEvent as any;
@@ -401,14 +402,10 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
 
     const processedPlayers = new Set<number>();
 
-    // P1 (üst yarı, 180° döndürülmüş)
-    // Ekranda: [status_pad] [miniBar] [canvas] [sabotageRow] | divider | P2
     const p1CanvasContainerHeight = flexHeight - STATUS_BAR_HEIGHT - miniBarHeight - sabotageRowHeight;
     const p1CanvasTop = STATUS_BAR_HEIGHT + miniBarHeight;
     const p1CanvasBottom = p1CanvasTop + p1CanvasContainerHeight;
 
-    // P2 (alt yarı, normal/düz)
-    // Ekranda: divider | [miniBar] [canvas] [sabotageRow]
     const p2HalfTop = flexHeight + dividerHeight;
     const p2CanvasContainerHeight = flexHeight - miniBarHeight - sabotageRowHeight;
     const p2CanvasTop = p2HalfTop + miniBarHeight;
@@ -632,10 +629,10 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
 
         {/* P1 Canvas */}
         <View style={styles.canvasContainer}>
-          <View pointerEvents="none">
+          <View pointerEvents={Platform.OS === 'web' ? 'auto' : 'none'}>
             <CircuitCanvas
               level={p1Level}
-              onTilePress={() => { }}
+              onTilePress={(tileId) => processTilePress(tileId, 1)}
               isSolved={p1Level.isSolved}
               maxHeight={canvasMaxHeight}
               blackout={p1Blackout}
@@ -673,6 +670,12 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
       {/* ORTA BÖLÜCÜ */}
       <View style={styles.divider}>
         <View style={styles.dividerCenter}>
+          <Pressable
+            style={({ pressed }) => [styles.dividerBackBtn, pressed && styles.btnPressed]}
+            onPress={onBack}
+          >
+            <ArrowLeft size={12} color="rgba(123,94,167,0.5)" />
+          </Pressable>
           <View style={styles.dividerLine} />
           <View style={styles.vsContainer}><Text style={styles.vsText}>VS</Text></View>
           <View style={styles.dividerLine} />
@@ -681,14 +684,8 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
 
       {/* ALT YARI - Oyuncu 2 (normal/düz) */}
       <View style={styles.playerHalf}>
-        {/* Mini bar: back + win dots + round */}
+        {/* Mini bar: win dots + round */}
         <View style={styles.miniBar}>
-          <Pressable
-            style={({ pressed }) => [styles.miniBackBtn, pressed && styles.btnPressed]}
-            onPress={onBack}
-          >
-            <ArrowLeft size={14} color={P2_COLOR} />
-          </Pressable>
           <View style={styles.winsContainer}>
             {Array.from({ length: currentTotalRounds }).map((_, i) => (
               <View key={i} style={[styles.winDot, i < p2Wins && styles.winDotActiveP2]} />
@@ -701,10 +698,10 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
 
         {/* P2 Canvas */}
         <View style={styles.canvasContainer}>
-          <View pointerEvents="none">
+          <View pointerEvents={Platform.OS === 'web' ? 'auto' : 'none'}>
             <CircuitCanvas
               level={p2Level}
-              onTilePress={() => { }}
+              onTilePress={(tileId) => processTilePress(tileId, 2)}
               isSolved={p2Level.isSolved}
               maxHeight={canvasMaxHeight}
               blackout={p2Blackout}
@@ -890,10 +887,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 12, height: 24, gap: 8,
   },
-  miniBackBtn: {
+  dividerBackBtn: {
     width: 22, height: 22, borderRadius: 11,
-    backgroundColor: 'rgba(193,122,58,0.1)',
+    backgroundColor: 'rgba(123,94,167,0.08)',
     alignItems: 'center', justifyContent: 'center',
+    marginRight: 4,
   },
   winsContainer: { flexDirection: 'row', gap: 4 },
   winDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(123,94,167,0.15)' },
