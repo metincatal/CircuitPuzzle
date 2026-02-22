@@ -100,7 +100,9 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
   const [p2SabotageAlert, setP2SabotageAlert] = useState<string | null>(null);
   const sabotagesUsedRef = useRef(0);
 
-  // Canvas layout'ları (locationX/locationY tabanlı hesaplama)
+  // Canvas container ref'leri (web touch koordinatları için)
+  const p1CanvasContainerRef = useRef<View>(null);
+  const p2CanvasContainerRef = useRef<View>(null);
 
   // Ref'ler
   const p1LevelRef = useRef<Level | null>(null);
@@ -390,7 +392,75 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     });
   }, []);
 
-  // ======== TOUCH HANDLER (Native only — web uses CircuitCanvas's own Pressable overlays) ========
+  // ======== WEB TOUCH: Native DOM pointer events + getBoundingClientRect ========
+  const webProcessPointer = useCallback((clientX: number, clientY: number) => {
+    if (gamePhaseRef.current !== 'playing') return;
+
+    const p1El = p1CanvasContainerRef.current as any;
+    const p2El = p2CanvasContainerRef.current as any;
+    if (!p1El || !p2El) return;
+
+    const p1Rect: DOMRect = p1El.getBoundingClientRect
+      ? p1El.getBoundingClientRect()
+      : p1El.measure ? null : null;
+    const p2Rect: DOMRect = p2El.getBoundingClientRect
+      ? p2El.getBoundingClientRect()
+      : p2El.measure ? null : null;
+    if (!p1Rect || !p2Rect) return;
+
+    let player: 1 | 2 | null = null;
+    let canvasX = 0, canvasY = 0;
+    let cW = 0, cH = 0;
+
+    if (clientY >= p1Rect.top && clientY <= p1Rect.bottom &&
+        clientX >= p1Rect.left && clientX <= p1Rect.right) {
+      player = 1;
+      canvasX = p1Rect.right - clientX;
+      canvasY = p1Rect.bottom - clientY;
+      cW = p1Rect.width;
+      cH = p1Rect.height;
+    } else if (clientY >= p2Rect.top && clientY <= p2Rect.bottom &&
+               clientX >= p2Rect.left && clientX <= p2Rect.right) {
+      player = 2;
+      canvasX = clientX - p2Rect.left;
+      canvasY = clientY - p2Rect.top;
+      cW = p2Rect.width;
+      cH = p2Rect.height;
+    }
+
+    if (!player) return;
+
+    const levelRef = player === 1 ? p1LevelRef : p2LevelRef;
+    const level = levelRef.current;
+    if (!level || level.isSolved) return;
+
+    const cellSize = getCellSize(level);
+    const actualW = cellSize * level.cols;
+    const actualH = cellSize * level.rows;
+    const offX = (cW - actualW) / 2;
+    const offY = (cH - actualH) / 2;
+
+    const col = Math.floor((canvasX - offX) / cellSize);
+    const row = Math.floor((canvasY - offY) / cellSize);
+
+    if (row >= 0 && row < level.rows && col >= 0 && col < level.cols) {
+      const tile = level.tiles.find(t => t.position.row === row && t.position.col === col);
+      if (tile) processTilePress(tile.id, player);
+    }
+  }, [processTilePress]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    const handlePointerUp = (e: PointerEvent) => {
+      webProcessPointer(e.clientX, e.clientY);
+    };
+
+    document.addEventListener('pointerup', handlePointerUp);
+    return () => { document.removeEventListener('pointerup', handlePointerUp); };
+  }, [webProcessPointer]);
+
+  // ======== NATIVE TOUCH HANDLER ========
   const handleRootTouch = useCallback((e: GestureResponderEvent) => {
     if (Platform.OS === 'web') return;
     if (gamePhaseRef.current !== 'playing') return;
@@ -628,11 +698,11 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
         </View>
 
         {/* P1 Canvas */}
-        <View style={styles.canvasContainer}>
-          <View pointerEvents={Platform.OS === 'web' ? 'auto' : 'none'}>
+        <View style={styles.canvasContainer} ref={p1CanvasContainerRef}>
+          <View pointerEvents="none">
             <CircuitCanvas
               level={p1Level}
-              onTilePress={(tileId) => processTilePress(tileId, 1)}
+              onTilePress={() => { }}
               isSolved={p1Level.isSolved}
               maxHeight={canvasMaxHeight}
               blackout={p1Blackout}
@@ -697,11 +767,11 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
         </View>
 
         {/* P2 Canvas */}
-        <View style={styles.canvasContainer}>
-          <View pointerEvents={Platform.OS === 'web' ? 'auto' : 'none'}>
+        <View style={styles.canvasContainer} ref={p2CanvasContainerRef}>
+          <View pointerEvents="none">
             <CircuitCanvas
               level={p2Level}
-              onTilePress={(tileId) => processTilePress(tileId, 2)}
+              onTilePress={() => { }}
               isSolved={p2Level.isSolved}
               maxHeight={canvasMaxHeight}
               blackout={p2Blackout}

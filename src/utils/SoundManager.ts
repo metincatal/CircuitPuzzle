@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform, Image } from 'react-native';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 
 const BGM_PLAYLIST = [
@@ -13,21 +13,37 @@ const BGM_PLAYLIST = [
 ];
 
 class SoundManager {
+    // Native
     static clickSound: Audio.Sound | null = null;
     static winSound: Audio.Sound | null = null;
     static bgmSound: Audio.Sound | null = null;
     static currentTrackIndex = 0;
-    static bgmStarted = false;
+
+    // Web
+    static webClickAudio: HTMLAudioElement | null = null;
+    static webWinAudio: HTMLAudioElement | null = null;
+    static webBgmAudio: HTMLAudioElement | null = null;
+    static webBgmStarted = false;
+
+    static resolveWebUri(source: any): string {
+        try {
+            const resolved = Image.resolveAssetSource(source);
+            if (resolved?.uri) return resolved.uri;
+        } catch (e) { }
+        if (typeof source === 'string') return source;
+        return source?.uri || source?.default || String(source);
+    }
 
     static async loadSounds() {
-        try {
-            await Audio.setAudioModeAsync({
-                playsInSilentModeIOS: true,
-                staysActiveInBackground: false,
-            });
-        } catch (e) {
-            // Web'de setAudioModeAsync kısıtlı olabilir
+        if (Platform.OS === 'web') {
+            this.loadWebSounds();
+            return;
         }
+
+        await Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: false,
+        });
 
         try {
             const { sound: click } = await Audio.Sound.createAsync(
@@ -40,22 +56,30 @@ class SoundManager {
                 require('../../assets/sounds/win2.mp3')
             );
             this.winSound = win;
+
+            this.playNextBGM();
         } catch (error) {
             console.log("Ses yükleme hatası:", error);
         }
-
-        if (Platform.OS === 'web') {
-            this.setupWebBGMAutostart();
-        } else {
-            this.playNextBGM();
-        }
     }
 
-    private static setupWebBGMAutostart() {
+    private static loadWebSounds() {
+        try {
+            const clickUri = this.resolveWebUri(require('../../assets/sounds/click2.mp3'));
+            this.webClickAudio = new window.Audio(clickUri);
+            this.webClickAudio.volume = 0.3;
+
+            const winUri = this.resolveWebUri(require('../../assets/sounds/win2.mp3'));
+            this.webWinAudio = new window.Audio(winUri);
+            this.webWinAudio.volume = 1.0;
+        } catch (e) {
+            console.log('Web ses yükleme hatası:', e);
+        }
+
         const startBGM = () => {
-            if (!this.bgmStarted) {
-                this.bgmStarted = true;
-                this.playNextBGM();
+            if (!this.webBgmStarted) {
+                this.webBgmStarted = true;
+                this.playNextWebBGM();
             }
             document.removeEventListener('click', startBGM);
             document.removeEventListener('touchstart', startBGM);
@@ -64,6 +88,32 @@ class SoundManager {
         document.addEventListener('click', startBGM);
         document.addEventListener('touchstart', startBGM);
         document.addEventListener('pointerdown', startBGM);
+    }
+
+    private static playNextWebBGM() {
+        try {
+            if (this.webBgmAudio) {
+                this.webBgmAudio.pause();
+                this.webBgmAudio.removeAttribute('src');
+                this.webBgmAudio = null;
+            }
+
+            const source = BGM_PLAYLIST[this.currentTrackIndex];
+            this.currentTrackIndex = (this.currentTrackIndex + 1) % BGM_PLAYLIST.length;
+
+            const uri = this.resolveWebUri(source);
+            this.webBgmAudio = new window.Audio(uri);
+            this.webBgmAudio.volume = 0.15;
+            this.webBgmAudio.addEventListener('ended', () => {
+                this.playNextWebBGM();
+            });
+            this.webBgmAudio.addEventListener('error', () => {
+                setTimeout(() => this.playNextWebBGM(), 2000);
+            });
+            this.webBgmAudio.play().catch(() => { });
+        } catch (e) {
+            console.log('Web BGM hatası:', e);
+        }
     }
 
     static async playNextBGM() {
@@ -93,12 +143,30 @@ class SoundManager {
     }
 
     static async playClick() {
+        if (Platform.OS === 'web') {
+            try {
+                if (this.webClickAudio) {
+                    this.webClickAudio.currentTime = 0;
+                    this.webClickAudio.play().catch(() => { });
+                }
+            } catch (e) { }
+            return;
+        }
         try {
             if (this.clickSound) await this.clickSound.replayAsync();
         } catch (e) { }
     }
 
     static async playWin() {
+        if (Platform.OS === 'web') {
+            try {
+                if (this.webWinAudio) {
+                    this.webWinAudio.currentTime = 0;
+                    this.webWinAudio.play().catch(() => { });
+                }
+            } catch (e) { }
+            return;
+        }
         try {
             if (this.winSound) await this.winSound.replayAsync();
         } catch (e) { }
