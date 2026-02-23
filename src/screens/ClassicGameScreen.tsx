@@ -5,10 +5,9 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { EyeOff, Eye, Camera, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react-native';
-let MediaLibrary: any = null;
+import * as Sharing from 'expo-sharing';
 let ViewShot: any = null;
 if (Platform.OS !== 'web') {
-  MediaLibrary = require('expo-media-library');
   ViewShot = require('react-native-view-shot').default;
 }
 
@@ -51,8 +50,10 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [tapPos, setTapPos] = useState({ x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 });
 
-  // Screenshot ref
+  // Screenshot ref ve gizleme state'i
   const viewShotRef = useRef<any>(null);
+  const puzzleRef = useRef<any>(null);
+  const [hideScreenshotBtn, setHideScreenshotBtn] = useState(false);
 
   useEffect(() => {
     goToLevel(initialLevel);
@@ -64,11 +65,7 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
       SoundManager.playWin();
       HapticManager.celebrationBurst();
 
-      Animated.timing(bgColorAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: false,
-      }).start();
+      bgColorAnim.setValue(1);
 
       StorageManager.saveLevelCompletion(`level-${levelNumber}`, 0, 3);
       StorageManager.saveLastClassicLevel(levelNumber);
@@ -155,28 +152,58 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
     });
   };
 
-  // Screenshot
+  // Screenshot ve paylaşım
   const handleScreenshot = async () => {
-    if (Platform.OS === 'web' || !MediaLibrary) return;
     try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') return;
+      setHideScreenshotBtn(true);
+      // Butanun gizlenmesi için bir frame bekle
+      await new Promise(r => setTimeout(r, 100));
 
-      if (viewShotRef.current) {
-        const uri = await viewShotRef.current.capture();
-        await MediaLibrary.saveToLibraryAsync(uri);
-        HapticManager.successNotification();
+      if (Platform.OS === 'web') {
+        // Web: html2canvas ile screenshot al
+        const html2canvas = (await import('html2canvas')).default;
+        const element = puzzleRef.current;
+        if (!element) { setHideScreenshotBtn(false); return; }
+        const canvas = await html2canvas(element, {
+          backgroundColor: COLORS.solvedBg,
+          scale: 2,
+        });
+        canvas.toBlob(async (blob: Blob | null) => {
+          if (!blob) { setHideScreenshotBtn(false); return; }
+          const file = new File([blob], 'circuit-puzzle.png', { type: 'image/png' });
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file] });
+          } else {
+            // Fallback: dosyayı indir
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'circuit-puzzle.png';
+            a.click();
+            URL.revokeObjectURL(url);
+          }
+          setHideScreenshotBtn(false);
+        });
+      } else {
+        // Native: ViewShot ile screenshot al, Sharing ile paylaş
+        if (viewShotRef.current) {
+          const uri = await viewShotRef.current.capture();
+          HapticManager.successNotification();
+          await Sharing.shareAsync(uri, {
+            mimeType: 'image/png',
+            dialogTitle: 'Puzzle Paylaş',
+          });
+        }
+        setHideScreenshotBtn(false);
       }
     } catch (e) {
       console.log('Screenshot error:', e);
+      setHideScreenshotBtn(false);
     }
   };
 
   const handleTilePress = useCallback((tileId: string) => {
     if (!level || level.isSolved) return;
-
-    const tile = level.tiles.find(t => t.id === tileId);
-    if (tile?.fixed) return;
 
     HapticManager.lightTap();
     SoundManager.playClick();
@@ -276,6 +303,7 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
             </ViewShot>
           ) : (
             <View
+              ref={puzzleRef}
               style={{ backgroundColor: level.isSolved ? COLORS.solvedBg : COLORS.background }}
             >
               <CircuitCanvas
@@ -304,7 +332,7 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
       )}
 
       {/* SCREENSHOT BUTONU */}
-      {level.isSolved && !isTransitioning && (
+      {level.isSolved && !isTransitioning && !hideScreenshotBtn && (
         <View style={styles.screenshotContainer}>
           <Pressable
             style={({ pressed }) => [styles.screenshotBtn, pressed && styles.btnPressed]}

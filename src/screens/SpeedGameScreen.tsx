@@ -249,9 +249,6 @@ export const SpeedGameScreen: React.FC<SpeedGameScreenProps> = ({ onBack }) => {
     if (!currentLevel || currentLevel.isSolved) return;
     if (phaseRef.current !== 'playing') return;
 
-    const tile = currentLevel.tiles.find(t => t.id === tileId);
-    if (tile?.fixed) return;
-
     HapticManager.lightTap();
     SoundManager.playClick();
 

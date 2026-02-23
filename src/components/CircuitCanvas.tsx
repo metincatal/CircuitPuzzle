@@ -15,7 +15,7 @@ export const COLORS = {
     passive: '#C4BAA8',
     active: '#6B7B3A',
     node: '#6B7B3A',
-    fixed: '#8B7B5A',
+    fixed: '#C4BAA8',
     solvedActive: '#4A8B5C',
     solvedBg: '#E0EBD5',
 };

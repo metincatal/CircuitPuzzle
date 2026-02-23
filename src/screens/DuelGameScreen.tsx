@@ -308,7 +308,7 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     setLevel(prevLevel => {
       if (!prevLevel) return null;
       const shuffleable = prevLevel.tiles.filter(t =>
-        !t.fixed && t.type !== 'blocker' && t.type !== 'source'
+        t.type !== 'blocker' && t.type !== 'source'
       );
       const toShuffle = shuffleable.sort(() => Math.random() - 0.5).slice(0, 3);
       const newTiles = prevLevel.tiles.map(t => {
@@ -363,9 +363,6 @@ export const DuelGameScreen: React.FC<DuelGameScreenProps> = ({ onBack }) => {
     const levelRef = player === 1 ? p1LevelRef : p2LevelRef;
     const currentLevel = levelRef.current;
     if (!currentLevel || currentLevel.isSolved) return;
-
-    const tile = currentLevel.tiles.find(t => t.id === tileId);
-    if (!tile || tile.fixed) return;
 
     HapticManager.lightTap();
     SoundManager.playClick();
