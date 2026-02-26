@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   StyleSheet, View, Pressable, SafeAreaView, Text,
   Dimensions, Platform, Animated, Easing, GestureResponderEvent,
+  Modal, TextInput, KeyboardAvoidingView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { EyeOff, Eye, Camera, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react-native';
@@ -49,6 +50,10 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
   const circleOpacity = useRef(new Animated.Value(1)).current;
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [tapPos, setTapPos] = useState({ x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 });
+
+  // Level jump modal
+  const [showLevelJump, setShowLevelJump] = useState(false);
+  const [levelInput, setLevelInput] = useState('');
 
   // Screenshot ref ve gizleme state'i
   const viewShotRef = useRef<any>(null);
@@ -259,7 +264,12 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
               <ChevronLeft size={20} color="rgba(107,123,58,0.6)" />
             </Pressable>
 
-            <Text style={styles.levelText}>{levelNumber}</Text>
+            <Pressable
+              onPress={() => { setLevelInput(''); setShowLevelJump(true); }}
+              style={({ pressed }) => [styles.levelTextBtn, pressed && styles.btnPressed]}
+            >
+              <Text style={styles.levelText}>{levelNumber}</Text>
+            </Pressable>
 
             <Pressable
               onPress={handleNextLevel}
@@ -342,6 +352,48 @@ export const ClassicGameScreen: React.FC<ClassicGameScreenProps> = ({
           </Pressable>
         </View>
       )}
+
+      {/* LEVEL JUMP MODAL */}
+      <Modal
+        visible={showLevelJump}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLevelJump(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowLevelJump(false)} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Seviyeye Git</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={levelInput}
+              onChangeText={setLevelInput}
+              keyboardType="number-pad"
+              placeholder={levelNumber.toString()}
+              placeholderTextColor="rgba(107,123,58,0.3)"
+              maxLength={5}
+              autoFocus
+              returnKeyType="go"
+              onSubmitEditing={() => {
+                const n = parseInt(levelInput, 10);
+                if (n >= 1) { goToLevel(n); setShowLevelJump(false); }
+              }}
+            />
+            <Pressable
+              style={({ pressed }) => [styles.modalBtn, pressed && styles.btnPressed]}
+              onPress={() => {
+                const n = parseInt(levelInput, 10);
+                if (n >= 1) { goToLevel(n); setShowLevelJump(false); }
+              }}
+            >
+              <Text style={styles.modalBtnText}>Git</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* CIRCLE REVEAL */}
       {isTransitioning && (
@@ -454,5 +506,62 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 50,
     backgroundColor: 'transparent',
+  },
+  levelTextBtn: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  // Level jump modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCard: {
+    backgroundColor: '#EDE7DC',
+    borderRadius: 20,
+    padding: 24,
+    width: 240,
+    alignItems: 'center',
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(107,123,58,0.7)',
+    letterSpacing: 0.3,
+  },
+  modalInput: {
+    width: '100%',
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: 'rgba(107,123,58,0.07)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(107,123,58,0.2)',
+    textAlign: 'center',
+    fontSize: 28,
+    fontWeight: '600',
+    color: COLORS.active,
+    fontVariant: ['tabular-nums'],
+  },
+  modalBtn: {
+    width: '100%',
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: COLORS.active,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.3,
   },
 });

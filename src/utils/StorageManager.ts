@@ -38,6 +38,7 @@ const STORAGE_KEYS = {
     SPEED_BEST_WAVE: '@circuit_speed_best_wave',
     LAST_CLASSIC_LEVEL: '@circuit_last_classic_level',
     DUEL_STATS: '@circuit_duel_stats',
+    ONBOARDING_DONE: '@circuit_onboarding_done',
 };
 
 class StorageManager {
@@ -294,6 +295,23 @@ class StorageManager {
         } catch (error) {
             console.error('Error saving duel result:', error);
         }
+    }
+
+    // ============= ONBOARDING =============
+
+    static async isOnboardingDone(): Promise<boolean> {
+        try {
+            const val = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_DONE);
+            return val === 'true';
+        } catch {
+            return false;
+        }
+    }
+
+    static async setOnboardingDone(): Promise<void> {
+        try {
+            await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_DONE, 'true');
+        } catch {}
     }
 
     /**

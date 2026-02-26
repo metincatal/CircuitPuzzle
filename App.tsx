@@ -6,6 +6,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { ClassicGameScreen } from './src/screens/ClassicGameScreen';
 import { SpeedGameScreen } from './src/screens/SpeedGameScreen';
 import { DuelGameScreen } from './src/screens/DuelGameScreen';
+import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import SoundManager from './src/utils/SoundManager';
 import StorageManager from './src/utils/StorageManager';
 import { COLORS } from './src/components/CircuitCanvas';
@@ -18,6 +19,7 @@ export default function App() {
   const [speedHighScore, setSpeedHighScore] = useState(0);
   const [speedBestWave, setSpeedBestWave] = useState(0);
   const [isReady, setIsReady] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -31,6 +33,9 @@ export default function App() {
       setSpeedHighScore(hs);
       const bw = await StorageManager.getSpeedBestWave();
       setSpeedBestWave(bw);
+
+      const onboardingDone = await StorageManager.isOnboardingDone();
+      if (!onboardingDone) setShowOnboarding(true);
 
       setIsReady(true);
     };
@@ -55,6 +60,17 @@ export default function App() {
       <View style={styles.loading}>
         <StatusBar style="dark" />
       </View>
+    );
+  }
+
+  if (showOnboarding) {
+    return (
+      <OnboardingScreen
+        onDone={() => {
+          StorageManager.setOnboardingDone();
+          setShowOnboarding(false);
+        }}
+      />
     );
   }
 
