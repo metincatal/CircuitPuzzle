@@ -3,6 +3,7 @@ import {
   View, Text, Pressable, StyleSheet, Animated, Easing,
   Dimensions, Platform, SafeAreaView,
 } from 'react-native';
+import { PRESENCE_ENABLED } from '../config/firebase';
 import { StatusBar } from 'expo-status-bar';
 import { Zap, Timer, Users, ChevronRight } from 'lucide-react-native';
 import { COLORS } from '../components/CircuitCanvas';
@@ -14,6 +15,7 @@ interface HomeScreenProps {
   lastClassicLevel: number;
   speedHighScore: number;
   speedBestWave: number;
+  onlineCount?: number;
 }
 
 const formatScore = (s: number): string =>
@@ -24,6 +26,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   lastClassicLevel,
   speedHighScore,
   speedBestWave,
+  onlineCount = 0,
 }) => {
   const titleOpacity = useRef(new Animated.Value(0)).current;
   const titleTranslateY = useRef(new Animated.Value(-20)).current;
@@ -113,6 +116,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <Text style={styles.titleMain}>CIRCUIT</Text>
           <Text style={styles.titleSub}>PUZZLE</Text>
           <View style={styles.titleLine} />
+          {PRESENCE_ENABLED && onlineCount > 0 && (
+            <View style={styles.onlineRow}>
+              <View style={styles.onlineDot} />
+              <Text style={styles.onlineText}>{onlineCount} kişi oynuyor</Text>
+            </View>
+          )}
         </Animated.View>
 
         {/* MOD KARTLARI */}
@@ -257,6 +266,24 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.active,
     marginTop: 16,
     opacity: 0.3,
+  },
+  onlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  onlineDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: COLORS.active,
+    opacity: 0.6,
+  },
+  onlineText: {
+    fontSize: 11,
+    color: 'rgba(107,123,58,0.45)',
+    letterSpacing: 0.4,
   },
   // Kartlar
   cardsContainer: {

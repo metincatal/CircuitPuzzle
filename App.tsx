@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, AppState, AppStateStatus } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -9,6 +9,7 @@ import { DuelGameScreen } from './src/screens/DuelGameScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import SoundManager from './src/utils/SoundManager';
 import StorageManager from './src/utils/StorageManager';
+import PresenceManager from './src/utils/PresenceManager';
 import { COLORS } from './src/components/CircuitCanvas';
 
 type Screen = 'home' | 'classic' | 'speed' | 'duel';
@@ -20,6 +21,8 @@ export default function App() {
   const [speedBestWave, setSpeedBestWave] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onlineCount, setOnlineCount] = useState(0);
+  const presenceUnsub = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -37,7 +40,23 @@ export default function App() {
       const onboardingDone = await StorageManager.isOnboardingDone();
       if (!onboardingDone) setShowOnboarding(true);
 
+      // Presence: kayıt ol ve canlı sayacı dinle
+      PresenceManager.register();
+      presenceUnsub.current = PresenceManager.subscribe(setOnlineCount);
+
+      // Arka plana geçince / ön plana gelince güncelle
+      const appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
+        if (state === 'active') PresenceManager.register();
+        else PresenceManager.unregister();
+      });
+
       setIsReady(true);
+
+      return () => {
+        PresenceManager.unregister();
+        presenceUnsub.current?.();
+        appStateSub.remove();
+      };
     };
     init();
   }, []);
@@ -82,6 +101,7 @@ export default function App() {
           lastClassicLevel={lastClassicLevel}
           speedHighScore={speedHighScore}
           speedBestWave={speedBestWave}
+          onlineCount={onlineCount}
         />
       );
     case 'classic':
