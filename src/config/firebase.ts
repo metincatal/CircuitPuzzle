@@ -1,31 +1,16 @@
 /**
- * Firebase yapılandırması
- *
- * Kurulum (bir kerelik, 5 dakika):
- * 1. console.firebase.google.com → Yeni proje oluştur
- * 2. Build → Realtime Database → Veritabanı oluştur (test modu)
- * 3. Proje Ayarları → Genel → Web uygulaması ekle → config'i aşağıya yapıştır
- *
- * Database Rules (Realtime Database → Kurallar):
- * {
- *   "rules": {
- *     "presence": {
- *       ".read": true,
- *       ".write": true
- *     }
- *   }
- * }
+ * Firebase yapılandırması — değerler .env dosyasından okunur (.gitignore'da).
+ * Yeni ortamda çalıştırmak için: .env dosyası oluştur, aşağıdaki değişkenleri doldur.
  */
 export const FIREBASE_CONFIG = {
-  apiKey:            'YOUR_API_KEY',
-  authDomain:        'YOUR_PROJECT.firebaseapp.com',
-  databaseURL:       'https://YOUR_PROJECT-default-rtdb.firebaseio.com',
-  projectId:         'YOUR_PROJECT',
-  storageBucket:     'YOUR_PROJECT.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId:             'YOUR_APP_ID',
+  apiKey:            process.env.EXPO_PUBLIC_FIREBASE_API_KEY            ?? '',
+  authDomain:        process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN        ?? '',
+  databaseURL:       process.env.EXPO_PUBLIC_FIREBASE_DATABASE_URL       ?? '',
+  projectId:         process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID         ?? '',
+  storageBucket:     process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET     ?? '',
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? '',
+  appId:             process.env.EXPO_PUBLIC_FIREBASE_APP_ID             ?? '',
 };
 
-// Config doldurmadan önce özelliği devre dışı bırakmak için true yapın
-export const PRESENCE_ENABLED =
-  FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY';
+// .env dolu olduğunda otomatik aktif olur
+export const PRESENCE_ENABLED = !!FIREBASE_CONFIG.apiKey;
